@@ -1,0 +1,31 @@
+{
+  "name": "MAICO EnOcean Bridge",
+  "description": "EnOcean MQTT Bridge für MAICO PP 45 RC Lüftungsgeräte",
+  "version": "0.1.0",
+  "slug": "maico-enocean-bridge",
+  "url": "https://github.com/zapfmeister/maico-enocean-mqtt",
+  "arch": ["aarch64", "amd64", "armv7"],
+  "startup": "application",
+  "boot": "auto",
+  "init": false,
+  "uart": true,
+  "usb": true,
+  "services": ["mqtt:want"],
+  "ports": {
+    "8080/tcp": 8080
+  },
+  "ports_description": {
+    "8080/tcp": "Web-UI"
+  },
+  "map": ["data:rw"],
+  "options": {
+    "serial_port": "/dev/ttyUSB0",
+    "poll_interval": 10,
+    "web_password": ""
+  },
+  "schema": {
+    "serial_port": "str",
+    "poll_interval": "int(5,60)",
+    "web_password": "str?"
+  }
+}

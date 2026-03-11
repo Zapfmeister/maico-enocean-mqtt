@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="{{ t.lang if t else 'de' }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}MAICO Controller{% endblock %}</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; color: #333; }
+        nav { background: #1a73e8; color: white; padding: 12px 20px; display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+        nav a { color: white; text-decoration: none; padding: 6px 12px; border-radius: 4px; }
+        nav a:hover, nav a.active { background: rgba(255,255,255,0.2); }
+        nav .brand { font-weight: bold; font-size: 1.1em; margin-right: auto; }
+        .lang-switch { margin-left: auto; display: flex; gap: 4px; }
+        .lang-switch a { padding: 4px 8px; font-size: 12px; opacity: 0.7; }
+        .lang-switch a.active-lang { opacity: 1; background: rgba(255,255,255,0.25); }
+        .container { max-width: 960px; margin: 20px auto; padding: 0 20px; }
+        .card { background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.12); padding: 20px; margin-bottom: 16px; }
+        .card h2 { margin-bottom: 12px; font-size: 1.1em; color: #555; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+        .btn { display: inline-block; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-decoration: none; }
+        .btn-primary { background: #1a73e8; color: white; }
+        .btn-primary:hover { background: #1557b0; }
+        .btn-danger { background: #dc3545; color: white; }
+        .btn-danger:hover { background: #c82333; }
+        .btn-sm { padding: 4px 10px; font-size: 12px; }
+        .btn-level { width: 40px; height: 40px; border: 2px solid #ddd; background: white; border-radius: 50%; cursor: pointer; font-weight: bold; font-size: 16px; }
+        .btn-level:hover { border-color: #1a73e8; }
+        .btn-level.active { background: #1a73e8; color: white; border-color: #1a73e8; }
+        .levels { display: flex; gap: 8px; margin: 8px 0; }
+        .status-badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; }
+        .status-on { background: #d4edda; color: #155724; }
+        .status-off { background: #f8d7da; color: #721c24; }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; margin-bottom: 4px; font-weight: 500; color: #555; }
+        .form-group input, .form-group select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
+        .alert { padding: 12px; border-radius: 4px; margin-bottom: 16px; }
+        .alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .alert-info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+        .meta { color: #888; font-size: 13px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 10px; text-align: left; border-bottom: 1px solid #eee; }
+        th { font-weight: 600; color: #555; }
+    </style>
+</head>
+<body>
+    <nav>
+        <span class="brand">{{ t.brand if t else 'MAICO Controller' }}</span>
+        <a href="/">{{ t.dashboard if t else 'Dashboard' }}</a>
+        <a href="/pair">{{ t.pairing if t else 'Anlernen' }}</a>
+        <a href="/devices">{{ t.devices if t else 'Geräte' }}</a>
+        <a href="/settings">{{ t.settings if t else 'Einstellungen' }}</a>
+        <a href="/logout">{{ t.logout if t else 'Logout' }}</a>
+        <div class="lang-switch">
+            <a href="/lang/de" class="{% if not t or t.lang == 'de' %}active-lang{% endif %}">DE</a>
+            <a href="/lang/en" class="{% if t and t.lang == 'en' %}active-lang{% endif %}">EN</a>
+        </div>
+    </nav>
+    <div class="container">
+        {% block content %}{% endblock %}
+    </div>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

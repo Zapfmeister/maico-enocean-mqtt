@@ -1,0 +1,13 @@
+services:
+  maico-bridge:
+    build: .
+    container_name: maico-enocean-bridge
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    devices:
+      - /dev/serial/by-id/usb-EnOcean_GmbH_USB_300_DE_XXXXXXXX-if00-port0:/dev/enocean
+    volumes:
+      - ./data:/data
+    env_file:
+      - .env

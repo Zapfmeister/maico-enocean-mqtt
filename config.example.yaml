@@ -1,0 +1,29 @@
+mqtt:
+  host: "homeassistant.local"
+  port: 1883
+  username: "your_user"
+  password: "your_password"
+  topic_prefix: "maico"
+  ha_discovery_prefix: "homeassistant"
+
+enocean:
+  device: "/dev/serial/by-id/usb-EnOcean_GmbH_USB_300_DE_XXXXXXXX-if00-port0"
+
+web:
+  port: 8080
+  password: "your_web_password"
+  hostname: "maico-controller"
+
+poll_interval: 10
+
+# Devices are auto-discovered from EnOcean traffic.
+# You can also add them manually here:
+devices: []
+#  - name: "Buero"
+#    friendly_name: "Büro"
+#    device_id: "XXXXXXXX"
+
+# Remote control (RLS 45 K) - monitored for state sync
+remote:
+  device_id: ""
+  name: "RLS 45 K"

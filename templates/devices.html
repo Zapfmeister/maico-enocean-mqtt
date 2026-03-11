@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}{{ t.devices }} - {{ t.brand }}{% endblock %}
+
+{% block content %}
+<h1 style="margin-bottom: 16px;">{{ t.devices }}</h1>
+
+<div class="card">
+    <table>
+        <thead>
+            <tr>
+                <th>{{ t.name }}</th>
+                <th>{{ t.device_id }}</th>
+                <th>{{ t.connection }}</th>
+                <th>{{ t.role }}</th>
+                <th>{{ t.actions }}</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for dev in devices %}
+            <tr id="row-{{ dev.name }}" {% if dev.is_slave %}class="slave-row"{% endif %}>
+                <td>
+                    {% if dev.is_slave %}<span class="slave-indent">↳</span>{% endif %}
+                    <strong>{{ dev.friendly_name }}</strong>
+                    <span class="meta">({{ dev.name }})</span>
+                </td>
+                <td class="meta">{{ dev.device_id }}</td>
+                <td>
+                    {% if dev.connection %}
+                    <span class="status-badge {% if dev.connection.connection == 'managed' %}status-managed{% elif dev.connection.connection == 'passive' %}status-passive{% elif dev.connection.detected_role == 'slave' %}status-slave{% else %}status-unknown{% endif %}">
+                        {% if dev.connection.connection == 'managed' %}{{ t.paired }}
+                        {% elif dev.connection.connection == 'passive' %}{{ t.passive }}
+                        {% elif dev.connection.detected_role == 'slave' %}{{ t.slave_via }}
+                        {% else %}{{ t.unknown }}{% endif %}
+                    </span>
+                    {% if dev.connection.last_seen_ago >= 0 %}
+                    <span class="meta">{{ dev.connection.last_seen_ago }}s</span>
+                    {% endif %}
+                    {% else %}
+                    <span class="meta">-</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if dev.connection %}
+                        {% if dev.connection.detected_role == 'master' %}
+                            {{ t.master }}
+                        {% elif dev.connection.detected_role == 'slave' %}
+                            {{ t.slave }}
+                        {% else %}
+                            {{ t.standalone }}
+                        {% endif %}
+                    {% else %}
+                    -
+                    {% endif %}
+                </td>
+                <td>
+                    <button class="btn btn-sm btn-primary" onclick="renameDevice('{{ dev.name }}')">{{ t.rename }}</button>
+                    <button class="btn btn-sm btn-danger" onclick="removeDevice('{{ dev.name }}')">{{ t.remove }}</button>
+                </td>
+            </tr>
+        {% endfor %}
+        {% if not devices %}
+            <tr><td colspan="5">{{ t.no_devices }} <a href="/pair">{{ t.pair_link }}</a></td></tr>
+        {% endif %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<style>
+    .status-managed { background: #d4edda; color: #155724; }
+    .status-passive { background: #fff3cd; color: #856404; }
+    .status-slave { background: #cce5ff; color: #004085; }
+    .status-unknown { background: #e2e3e5; color: #383d41; }
+    .slave-row { background: #f8f9fa; }
+    .slave-indent { color: #999; margin-right: 6px; }
+</style>
+<script>
+const t_new_name = {{ t.new_name | tojson }};
+const t_confirm_remove = {{ t.confirm_remove | tojson }};
+
+async function removeDevice(name) {
+    if (!confirm(t_confirm_remove)) return;
+    const resp = await fetch(`/api/device/${name}/remove`, {method: 'POST'});
+    if (resp.ok) {
+        document.getElementById(`row-${name}`).remove();
+    }
+}
+
+async function renameDevice(name) {
+    const newName = prompt(t_new_name);
+    if (!newName) return;
+    await fetch(`/api/device/${name}/rename`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({friendly_name: newName}),
+    });
+    location.reload();
+}
+</script>
+{% endblock %}

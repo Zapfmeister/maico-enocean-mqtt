@@ -1,0 +1,229 @@
+{% extends "base.html" %}
+{% block title %}{{ t.dashboard }} - {{ t.brand }}{% endblock %}
+
+{% macro device_badge(dev) %}
+<div style="display: flex; gap: 6px; align-items: center;">
+    {% if dev.connection %}
+    <span class="status-badge {% if dev.connection.connection == 'managed' %}status-managed{% elif dev.connection.connection == 'passive' %}status-passive{% elif dev.connection.detected_role == 'slave' %}status-slave{% else %}status-unknown{% endif %}"
+          title="{% if dev.connection.connection == 'managed' %}{{ t.paired }}{% elif dev.connection.connection == 'passive' %}{{ t.passive }}{% elif dev.connection.detected_role == 'slave' %}{{ t.slave }}{% else %}{{ t.unknown }}{% endif %}">
+        {% if dev.connection.connection == 'managed' %}{{ t.paired }}{% elif dev.connection.connection == 'passive' %}{{ t.passive }}{% elif dev.connection.detected_role == 'slave' %}{{ t.slave }}{% else %}{{ t.unknown }}{% endif %}
+    </span>
+    {% endif %}
+    {% if dev.state %}
+    <span class="status-badge {{ 'status-on' if dev.state.is_on else 'status-off' }}">
+        {{ t.on if dev.state.is_on else t.off_badge }}
+    </span>
+    {% endif %}
+</div>
+{% endmacro %}
+
+{% macro device_state(dev) %}
+{% if dev.state %}
+<div class="device-info">
+    <div class="info-row"><span class="info-label">{{ t.mode }}:</span> {{ mode_labels.get(dev.state.mode, dev.state.mode) }}</div>
+    <div class="info-row"><span class="info-label">{{ t.fan }}:</span> {% if dev.state.fan_level > 0 %}{{ t.level }} {{ dev.state.fan_level }}{% else %}{{ t.off }}{% endif %}</div>
+    {% if dev.state.direction != 'unknown' %}
+    <div class="info-row"><span class="info-label">{{ t.airflow }}:</span> {{ direction_labels.get(dev.state.direction, dev.state.direction) }}</div>
+    {% endif %}
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro device_controls(dev) %}
+{% if (not dev.connection or dev.connection.connection == 'managed') and (not dev.connection or dev.connection.detected_role != 'slave') %}
+<div class="controls-section">
+    <div class="control-group">
+        <span class="control-label">{{ t.fan }}:</span>
+        <div class="levels">
+            {% for level in range(6) %}
+            <button class="btn-level {% if dev.state and dev.state.fan_level == level %}active{% endif %}"
+                    onclick="setLevel('{{ dev.name }}', {{ level }})">
+                {{ level }}
+            </button>
+            {% endfor %}
+        </div>
+    </div>
+    <div class="control-group">
+        <span class="control-label">{{ t.mode }}:</span>
+        <div class="modes">
+            <button class="btn-mode {% if dev.state and dev.state.mode == 'heat_exchanger' %}active{% endif %}"
+                    onclick="setMode('{{ dev.name }}', 'heat_exchanger')">{{ t.mode_btn_heat }}</button>
+            <button class="btn-mode {% if dev.state and dev.state.mode == 'summer' %}active{% endif %}"
+                    onclick="setMode('{{ dev.name }}', 'summer')">{{ t.mode_btn_summer }}</button>
+            <button class="btn-mode btn-mode-special {% if dev.state and dev.state.mode in ('sleep_heat', 'sleep_summer') %}active{% endif %}"
+                    onclick="setMode('{{ dev.name }}', 'sleep')">{{ t.mode_btn_sleep }}</button>
+            <button class="btn-mode btn-mode-special {% if dev.state and dev.state.mode == 'boost' %}active{% endif %}"
+                    onclick="setMode('{{ dev.name }}', 'boost')">{{ t.mode_btn_boost }}</button>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% block content %}
+<h1 style="margin-bottom: 16px;">{{ t.dashboard }}</h1>
+<p class="meta" style="margin-bottom: 20px;">{{ t.base_id }}: {{ bridge_base_id }}</p>
+
+<div class="grid">
+
+{% for pair in pairs %}
+<div class="card pair-card" id="device-{{ pair.master.name }}">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+        <h2 style="margin: 0;">{{ pair.master.friendly_name }}</h2>
+        {{ device_badge(pair.master) }}
+    </div>
+    <p class="meta">{{ pair.master.device_id }}</p>
+    {{ device_state(pair.master) }}
+    {{ device_controls(pair.master) }}
+
+    {% for slave in pair.slaves %}
+    <div class="slave-section" id="device-{{ slave.name }}">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+                <span class="slave-indicator">↳</span>
+                <strong>{{ slave.friendly_name }}</strong>
+            </div>
+            {{ device_badge(slave) }}
+        </div>
+        <p class="meta" style="margin-left: 20px;">{{ slave.device_id }}</p>
+        <div style="margin-left: 20px;">{{ device_state(slave) }}</div>
+    </div>
+    {% endfor %}
+</div>
+{% endfor %}
+
+{% for dev in standalone %}
+<div class="card" id="device-{{ dev.name }}">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+        <h2 style="margin: 0;">{{ dev.friendly_name }}</h2>
+        {{ device_badge(dev) }}
+    </div>
+    <p class="meta">{{ dev.device_id }}</p>
+    {{ device_state(dev) }}
+    {{ device_controls(dev) }}
+</div>
+{% endfor %}
+
+{% if not pairs and not standalone %}
+<div class="card">
+    <p>{{ t.no_devices }} <a href="/pair">{{ t.pair_link }}</a></p>
+</div>
+{% endif %}
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<style>
+    .status-managed { background: #d4edda; color: #155724; }
+    .status-passive { background: #fff3cd; color: #856404; }
+    .status-slave { background: #cce5ff; color: #004085; }
+    .status-unknown { background: #e2e3e5; color: #383d41; }
+    .slave-section {
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px solid #e0e0e0;
+    }
+    .slave-indicator {
+        color: #999;
+        margin-right: 4px;
+    }
+    .pair-card {
+        border-left: 3px solid #4a90d9;
+    }
+    .device-info {
+        margin: 8px 0 4px 0;
+    }
+    .info-row {
+        margin: 2px 0;
+        font-size: 0.95em;
+    }
+    .info-label {
+        color: #666;
+        min-width: 70px;
+        display: inline-block;
+    }
+    .controls-section {
+        margin-top: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+    .control-group {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+    .control-label {
+        color: #666;
+        font-size: 0.85em;
+    }
+    .modes {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+    }
+    .btn-mode {
+        padding: 5px 10px;
+        border: 2px solid #ddd;
+        background: white;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 12px;
+        color: #333;
+        transition: all 0.15s;
+    }
+    .btn-mode:hover {
+        border-color: #1a73e8;
+        color: #1a73e8;
+    }
+    .btn-mode.active {
+        background: #1a73e8;
+        color: white;
+        border-color: #1a73e8;
+    }
+    .btn-mode-special.active {
+        background: #e67e22;
+        border-color: #e67e22;
+    }
+</style>
+<script>
+async function setLevel(name, level) {
+    try {
+        const resp = await fetch(`/api/device/${name}/level`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({level: level})
+        });
+        if (resp.ok) {
+            const card = document.getElementById(`device-${name}`);
+            card.querySelectorAll('.btn-level').forEach((btn, i) => {
+                btn.classList.toggle('active', i === level);
+            });
+        }
+    } catch (e) {
+        console.error('Failed to set level:', e);
+    }
+}
+
+async function setMode(name, mode) {
+    try {
+        const resp = await fetch(`/api/device/${name}/mode`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({mode: mode})
+        });
+        if (resp.ok) {
+            const card = document.getElementById(`device-${name}`);
+            card.querySelectorAll('.btn-mode').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+        }
+    } catch (e) {
+        console.error('Failed to set mode:', e);
+    }
+}
+
+// Auto-refresh every 10s
+setTimeout(() => location.reload(), 10000);
+</script>
+{% endblock %}

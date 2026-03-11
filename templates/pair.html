@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}{{ t.pairing }} - {{ t.brand }}{% endblock %}
+
+{% block content %}
+<h1 style="margin-bottom: 16px;">{{ t.pair_title }}</h1>
+
+<div class="card">
+    <h2>{{ t.pair_instructions }}</h2>
+    <ol style="padding-left: 20px; line-height: 1.8;">
+        <li>{{ t.pair_step1 | safe }}</li>
+        <li>{{ t.pair_step2 | safe }}</li>
+    </ol>
+</div>
+
+<div class="card">
+    <h2>{{ t.scan }}</h2>
+    <button class="btn btn-primary" id="scan-btn" onclick="startScan()">{{ t.scan_start }}</button>
+    <div id="scan-status" style="margin-top: 12px;"></div>
+    <div id="scan-results" style="margin-top: 12px; display: none;"></div>
+</div>
+
+<div class="card" id="save-form" style="display: none;">
+    <h2>{{ t.save_device }}</h2>
+    <div class="form-group">
+        <label>{{ t.device_id }}</label>
+        <input type="text" id="device-id" readonly>
+    </div>
+    <div class="form-group">
+        <label>{{ t.internal_name }}</label>
+        <input type="text" id="device-name" placeholder="{{ t.internal_name_placeholder }}">
+    </div>
+    <div class="form-group">
+        <label>{{ t.friendly_name }}</label>
+        <input type="text" id="device-friendly" placeholder="{{ t.friendly_name_placeholder }}">
+    </div>
+    <button class="btn btn-primary" onclick="saveDevice()">{{ t.save }}</button>
+    <div id="save-status" style="margin-top: 8px;"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const t_scanning = {{ t.scanning | tojson }};
+const t_scan_start = {{ t.scan_start | tojson }};
+const t_scan_sending = {{ t.scan_sending | tojson }};
+const t_scan_found = {{ t.scan_found | tojson }};
+const t_scan_not_found = {{ t.scan_not_found | tojson }};
+const t_device_saved = {{ t.device_saved | tojson }};
+const t_name_required = {{ t.name_required | tojson }};
+
+async function startScan() {
+    const btn = document.getElementById('scan-btn');
+    const status = document.getElementById('scan-status');
+    const results = document.getElementById('scan-results');
+
+    btn.disabled = true;
+    btn.textContent = t_scanning;
+    status.innerHTML = `<p>${t_scan_sending}</p>`;
+    results.style.display = 'none';
+
+    try {
+        const resp = await fetch('/api/pair', {method: 'POST'});
+        const data = await resp.json();
+
+        if (data.found_devices && data.found_devices.length > 0) {
+            status.innerHTML = `<div class="alert alert-success">${t_scan_found}</div>`;
+            results.style.display = 'block';
+            results.innerHTML = data.found_devices.map(id =>
+                `<button class="btn btn-primary" style="margin: 4px;" onclick="selectDevice('${id}')">${id}</button>`
+            ).join('');
+        } else {
+            status.innerHTML = `<div class="alert alert-info">${t_scan_not_found}</div>`;
+        }
+    } catch (e) {
+        status.innerHTML = `<div class="alert" style="background:#f8d7da;color:#721c24;">Error: ${e.message}</div>`;
+    }
+
+    btn.disabled = false;
+    btn.textContent = t_scan_start;
+}
+
+function selectDevice(deviceId) {
+    document.getElementById('device-id').value = deviceId;
+    document.getElementById('save-form').style.display = 'block';
+    document.getElementById('device-name').focus();
+}
+
+async function saveDevice() {
+    const payload = {
+        device_id: document.getElementById('device-id').value,
+        name: document.getElementById('device-name').value,
+        friendly_name: document.getElementById('device-friendly').value,
+    };
+
+    if (!payload.name) {
+        document.getElementById('save-status').innerHTML = `<span style="color:red;">${t_name_required}</span>`;
+        return;
+    }
+
+    try {
+        const resp = await fetch('/api/pair/save', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload),
+        });
+        const data = await resp.json();
+        if (data.status === 'saved') {
+            document.getElementById('save-status').innerHTML =
+                `<div class="alert alert-success">"${data.name}" ${t_device_saved}</div>`;
+        } else {
+            document.getElementById('save-status').innerHTML =
+                `<span style="color:red;">Error: ${data.error || 'unknown'}</span>`;
+        }
+    } catch (e) {
+        document.getElementById('save-status').innerHTML = `<span style="color:red;">${e.message}</span>`;
+    }
+}
+</script>
+{% endblock %}
