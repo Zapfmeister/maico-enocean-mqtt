@@ -6,7 +6,7 @@ services:
     ports:
       - "8080:8080"
     devices:
-      - /dev/serial/by-id/usb-EnOcean_GmbH_USB_300_DE_XXXXXXXX-if00-port0:/dev/enocean
+      - ${ENOCEAN_DEVICE_PATH:-/dev/ttyUSB0}:/dev/enocean
     volumes:
       - ./data:/data
     env_file:

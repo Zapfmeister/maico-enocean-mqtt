@@ -77,6 +77,11 @@ class AppConfig:
         return None
 
     def add_device(self, device: DeviceConfig) -> None:
+        # Prevent duplicates by device_id or name
+        existing = self.get_device_by_id(device.device_id) or self.get_device_by_name(device.name)
+        if existing:
+            existing.friendly_name = device.friendly_name or existing.friendly_name
+            return
         self.devices.append(device)
 
     def remove_device(self, name: str) -> bool:

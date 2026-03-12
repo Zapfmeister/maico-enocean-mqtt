@@ -400,6 +400,9 @@ def create_web_app(bridge: "MaicoMqttBridge") -> FastAPI:
         # Publish MQTT discovery
         bridge.mqtt.publish_device_discovery(new_device)
 
+        # Set default level 2
+        bridge.set_level(name, 2)
+
         return JSONResponse({"status": "saved", "name": name})
 
     # --- Settings ---

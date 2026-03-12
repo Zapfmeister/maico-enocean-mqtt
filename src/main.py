@@ -219,6 +219,9 @@ class MaicoMqttBridge:
         # Publish HA discovery
         self.mqtt.publish_device_discovery(device)
 
+        # Set default level 2
+        self.set_level(name, 2)
+
         logger.info("Auto-discovered new device: %s (%s)", name, device_id_str)
         self.mqtt.publish_event("device_discovered", {
             "device_id": device_id_str,
