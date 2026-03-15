@@ -80,16 +80,19 @@ async def run_teach_in(serial: EnOceanSerial, timeout: int = SCAN_TIMEOUT) -> Te
             serial.send(data, optional)
             logger.info("Teach-in: scan sent (%d/%ds)", int(time.monotonic() - start), timeout)
 
-            # Wait before next scan
-            await asyncio.sleep(SCAN_INTERVAL)
+            # Wait for response, check every 0.5s for early exit
+            for _ in range(SCAN_INTERVAL * 2):
+                await asyncio.sleep(0.5)
+                if found:
+                    break
 
             if found:
-                # Found at least one device, confirm with 27 20
-                for dev_id_str in found:
-                    dev_id = [int(dev_id_str[i:i+2], 16) for i in range(0, 8, 2)]
-                    data, optional = build_set_level(serial.base_id, dev_id, 0)
-                    serial.send(data, optional)
-                    logger.info("Teach-in: confirmed pairing with %s", dev_id_str)
+                # Found a device, confirm with 27 20 and stop
+                dev_id_str = found[0]
+                dev_id = [int(dev_id_str[i:i+2], 16) for i in range(0, 8, 2)]
+                data, optional = build_set_level(serial.base_id, dev_id, 0)
+                serial.send(data, optional)
+                logger.info("Teach-in: confirmed pairing with %s", dev_id_str)
                 break
 
     finally:
@@ -97,4 +100,38 @@ async def run_teach_in(serial: EnOceanSerial, timeout: int = SCAN_TIMEOUT) -> Te
 
     result.found_devices = found
     result.status = "found" if found else "timeout"
+    return result
+
+
+async def run_rls_teach_in(bridge, timeout: int = SCAN_TIMEOUT) -> TeachInResult:
+    """Run RLS teach-in: listen for 27 30 scans from RLS and respond as fake PP 45.
+
+    The bridge handles the actual response in _handle_rls_scan().
+    This function just manages the teach-in window timing.
+    """
+    result = TeachInResult()
+
+    if not bridge.serial.base_id:
+        result.status = "error"
+        result.error = "No base ID available"
+        return result
+
+    result.status = "scanning"
+    bridge._rls_teach_in_active = True
+    bridge._rls_teach_in_result = None
+
+    logger.info("RLS teach-in: waiting for RLS scan (%ds timeout)", timeout)
+
+    try:
+        start = time.monotonic()
+        while time.monotonic() - start < timeout:
+            await asyncio.sleep(1)
+            if bridge._rls_teach_in_result:
+                result.found_devices = [bridge._rls_teach_in_result]
+                result.status = "found"
+                return result
+    finally:
+        bridge._rls_teach_in_active = False
+
+    result.status = "timeout"
     return result

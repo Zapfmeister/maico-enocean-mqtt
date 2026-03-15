@@ -170,6 +170,55 @@ def build_scan(base_id: list[int]) -> tuple[list[int], list[int]]:
     return data, optional
 
 
+def build_status_report(fake_device_id: list[int], rls_id: list[int],
+                        level: int, mode: VentilationMode = VentilationMode.HEAT_EXCHANGER) -> tuple[list[int], list[int]]:
+    """Build MSC 27 10 status report, pretending to be a PP 45.
+
+    Sent in reply to a 27 20 command from the RLS so it knows we're alive.
+
+    Args:
+        fake_device_id: Our fake PP 45 device ID (4 bytes)
+        rls_id: RLS remote sender ID (4 bytes)
+        level: Current ventilation level 0-5
+        mode: Current operating mode
+
+    Returns:
+        (data, optional) tuple for send_esp3
+    """
+    level = max(0, min(5, level))
+
+    if mode == VentilationMode.OFF or level == 0:
+        stufe = 0x00
+    elif mode == VentilationMode.SUMMER:
+        stufe = 0x08 + level
+    elif mode in (VentilationMode.SLEEP_HEAT, VentilationMode.SLEEP_SUMMER):
+        stufe = 0x40 if mode == VentilationMode.SLEEP_HEAT else 0x48
+    else:
+        # Heat exchanger — exhaust direction as default
+        stufe = level
+
+    data = [RORG_MSC, MSC_FUNC, 0x10, stufe, 0xE0, 0x00, 0x00, 0x00] + fake_device_id + [0x00]
+    optional = [0x03] + rls_id + [0xFF, 0x00]
+    return data, optional
+
+
+def build_teach_in_response(fake_device_id: list[int], rls_id: list[int]) -> tuple[list[int], list[int]]:
+    """Build MSC 27 40 teach-in response, pretending to be a PP 45.
+
+    Sent in reply to a 27 30 scan from the RLS remote so it pairs with us.
+
+    Args:
+        fake_device_id: Our fake PP 45 device ID (4 bytes, derived from base_id + 1)
+        rls_id: RLS remote sender ID (4 bytes)
+
+    Returns:
+        (data, optional) tuple for send_esp3
+    """
+    data = [RORG_MSC, MSC_FUNC, 0x40] + fake_device_id + [0x00]
+    optional = [0x03] + rls_id + [0xFF, 0x00]
+    return data, optional
+
+
 def parse_msc_telegram(user_data: list[int], sender: list[int], dest: list[int] | None = None) -> MscTelegram | None:
     """Parse MSC telegram user_data into structured MscTelegram.
 

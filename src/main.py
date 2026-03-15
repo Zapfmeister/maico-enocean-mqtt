@@ -20,6 +20,8 @@ from .maico_protocol import (
     VentilationState,
     AirflowDirection,
     build_set_level,
+    build_status_report,
+    build_teach_in_response,
     id_to_str,
     parse_msc_telegram,
     str_to_id,
@@ -61,6 +63,8 @@ class ConnectionStatus:
     UNKNOWN = "unknown"
 
 
+SYNC_ROLE_TIMEOUT = 120  # seconds without sync before role resets
+
 @dataclass
 class DeviceStatus:
     connection: str = ConnectionStatus.UNKNOWN
@@ -70,6 +74,7 @@ class DeviceStatus:
     # Detected relationships from 27 00 sync traffic
     syncs_to: str | None = None       # Device ID this device sends 27 00 to (= is master of)
     synced_from: str | None = None     # Device ID that sends 27 00 to us (= our master)
+    last_sync: float = 0.0            # Timestamp of last sync traffic
 
     @property
     def last_seen_ago(self) -> int:
@@ -79,7 +84,11 @@ class DeviceStatus:
 
     @property
     def detected_role(self) -> str:
-        """Role detected from traffic, not config."""
+        """Role detected from traffic, not config. Expires after timeout."""
+        if self.last_sync > 0 and (time.time() - self.last_sync) > SYNC_ROLE_TIMEOUT:
+            self.syncs_to = None
+            self.synced_from = None
+            self.last_sync = 0.0
         if self.syncs_to:
             return "master"
         if self.synced_from:
@@ -115,6 +124,11 @@ class MaicoMqttBridge:
         self._saved_states: dict[str, VentilationState] = {}  # saved before sleep/boost
         self._mode_timers: dict[str, asyncio.Task] = {}  # active mode timers
         self._timer_end: dict[str, float] = {}  # timestamp when timer expires
+        self._last_rls_state: VentilationState | None = None
+        self._rls_teach_in_active: bool = False
+        self._rls_teach_in_result: str | None = None
+        self._polling_paused: bool = False
+        self._poll_skip_until: float = 0.0  # skip polls until this timestamp (after RLS sync)
 
     @property
     def states(self) -> dict[str, VentilationState]:
@@ -154,6 +168,13 @@ class MaicoMqttBridge:
         dest = pkt.get('dest')
         sender_str = id_to_str(sender)
 
+        # Ignore our own transmissions (fake PP 45 ID echo)
+        if self.serial.base_id:
+            fake = list(self.serial.base_id)
+            fake[3] = (fake[3] + 1) & 0xFF
+            if sender == fake:
+                return
+
         if rorg == RORG_MSC:
             telegram = parse_msc_telegram(user_data, sender, dest)
             if not telegram:
@@ -178,6 +199,9 @@ class MaicoMqttBridge:
                 logger.debug("27 00 sync %s → %s: %s", sender_str, dest_str, raw_hex)
                 self._handle_sync(sender_str, dest, user_data)
 
+            elif telegram.msg_type == MscType.TEACH_IN_SCAN:
+                self._handle_rls_scan(sender_str)
+
             elif telegram.msg_type == MscType.TEACH_IN_RESPONSE:
                 self._handle_teach_in_response(sender_str, dest)
 
@@ -186,10 +210,15 @@ class MaicoMqttBridge:
 
     def _auto_discover_device(self, device_id_str: str) -> str:
         """Auto-discover a new MAICO device from traffic. Returns device name."""
-        # Skip if it's the RLS remote or our own base ID
+        # Skip if it's the RLS remote, our own base ID, or our fake PP 45 ID
         rls_id = self.config.remote.device_id.upper().replace(":", "")
         our_base = id_to_str(self.serial.base_id) if self.serial.base_id else ""
-        if device_id_str in (rls_id, our_base):
+        our_fake = ""
+        if self.serial.base_id:
+            fake = list(self.serial.base_id)
+            fake[3] = (fake[3] + 1) & 0xFF
+            our_fake = id_to_str(fake)
+        if device_id_str in (rls_id, our_base, our_fake):
             return ""
 
         # Already known?
@@ -203,6 +232,11 @@ class MaicoMqttBridge:
             self._id_to_name[device_id_str] = existing.name
             self._name_to_config[existing.name] = existing
             return existing.name
+
+        # Don't auto-discover when polling is paused (user is doing manual pairing)
+        if self._polling_paused:
+            logger.debug("Auto-discovery skipped (polling paused): %s", device_id_str)
+            return ""
 
         # New device — auto-register with ID as name
         name = f"PP45_{clean_id[-4:]}"
@@ -291,14 +325,57 @@ class MaicoMqttBridge:
                         name, ds.connection, state.mode.value, state.fan_level,
                         state.direction.value)
 
+    def _send_rls_status_report(self, state: VentilationState) -> None:
+        """Send 27 10 status report back to RLS, pretending to be a PP 45."""
+        if not self.serial.base_id or not self.config.remote.device_id:
+            return
+        if self._polling_paused:
+            return
+        fake_id = list(self.serial.base_id)
+        fake_id[3] = (fake_id[3] + 1) & 0xFF
+        rls_id = str_to_id(self.config.remote.device_id)
+        data, optional = build_status_report(fake_id, rls_id, state.fan_level, state.mode)
+        self.serial.send(data, optional)
+
     def _handle_external_command(self, sender_str: str, dest: list[int] | None,
                                  state: VentilationState | None) -> None:
         rls_id = self.config.remote.device_id.upper().replace(":", "")
-        if sender_str == rls_id and state and dest:
-            dest_str = id_to_str(dest)
-            # Auto-discover device that RLS sends commands to
-            dest_name = self._id_to_name.get(dest_str) or self._auto_discover_device(dest_str)
-            logger.info("RLS → %s: level=%d", dest_name or dest_str, state.fan_level)
+        if sender_str != rls_id or state is None:
+            return
+
+        # Always respond with status report so the RLS knows we're alive
+        self._send_rls_status_report(state)
+
+        if not self.config.rls_global_sync:
+            logger.info("RLS → level=%d (sync disabled)", state.fan_level)
+            return
+
+        # Change Detection — only react on actual changes
+        last = self._last_rls_state
+        if last and last.fan_level == state.fan_level and last.mode == state.mode:
+            return  # Periodic broadcast, no change
+
+        self._last_rls_state = VentilationState(
+            mode=state.mode, fan_level=state.fan_level
+        )
+
+        logger.info("RLS change: level=%d mode=%s → syncing all devices",
+                     state.fan_level, state.mode.value)
+
+        # Skip polls briefly so they don't overwrite the RLS sync
+        self._poll_skip_until = time.time() + self.config.poll_interval + 2
+
+        # Sync all master/standalone devices
+        for device in self.config.devices:
+            dev_status = self._device_status.get(device.name)
+            if dev_status and dev_status.detected_role == "slave":
+                continue
+            # Set mode first if changed, then level — avoid sending conflicting commands
+            current = self._states.get(device.name)
+            if state.mode in (VentilationMode.HEAT_EXCHANGER, VentilationMode.SUMMER):
+                if not current or current.mode != state.mode:
+                    self.set_mode(device.name, state.mode)
+            self.set_level(device.name, state.fan_level)
 
     def _handle_sync(self, sender_str: str, dest: list[int] | None,
                      user_data: list[int]) -> None:
@@ -311,8 +388,10 @@ class MaicoMqttBridge:
         dest_name = self._id_to_name.get(dest_str) or self._auto_discover_device(dest_str)
 
         # Detect master-slave relationship
+        now = time.time()
         if sender_name:
             ds = self._device_status.setdefault(sender_name, DeviceStatus())
+            ds.last_sync = now
             if ds.syncs_to != dest_str:
                 ds.syncs_to = dest_str
                 logger.info("Detected: %s (%s) is master of %s (%s)",
@@ -322,6 +401,7 @@ class MaicoMqttBridge:
 
         if dest_name:
             ds = self._device_status.setdefault(dest_name, DeviceStatus())
+            ds.last_sync = now
             if ds.synced_from != sender_str:
                 ds.synced_from = sender_str
                 logger.info("Detected: %s (%s) is slave of %s (%s)",
@@ -373,6 +453,38 @@ class MaicoMqttBridge:
             "device_id": sender_str,
             "status": "learning",
         })
+
+    def _handle_rls_scan(self, sender_str: str) -> None:
+        """Handle 27 30 scan from RLS during RLS teach-in mode."""
+        if not self._rls_teach_in_active:
+            logger.debug("27 30 scan from %s (RLS teach-in not active, ignoring)", sender_str)
+            return
+
+        if not self.serial.base_id:
+            return
+
+        # Derive fake device ID from base_id + 1
+        fake_id = list(self.serial.base_id)
+        fake_id[3] = (fake_id[3] + 1) & 0xFF
+        rls_id = str_to_id(sender_str)
+
+        # Respond with 27 40 teach-in response
+        data, optional = build_teach_in_response(fake_id, rls_id)
+        self.serial.send(data, optional)
+        logger.info("RLS teach-in: responded to scan from %s with fake ID %s",
+                     sender_str, id_to_str(fake_id))
+
+        # Confirm with 27 20 (set level 0)
+        data, optional = build_set_level(fake_id, rls_id, 0)
+        self.serial.send(data, optional)
+
+        # Save RLS device ID
+        self.config.remote.device_id = sender_str
+        self._id_to_name[sender_str] = self.config.remote.name
+        self.config.save()
+
+        self._rls_teach_in_result = sender_str
+        logger.info("RLS teach-in: paired with RLS %s", sender_str)
 
     def set_level(self, device_name: str, level: int) -> bool:
         device = self._name_to_config.get(device_name)
@@ -531,23 +643,27 @@ class MaicoMqttBridge:
                 if not self._running:
                     break
 
-                if self.serial.base_id:
+                if self.serial.base_id and not self._polling_paused and time.time() > self._poll_skip_until:
+                    current = self._states.get(device.name, VentilationState())
                     if device.name not in self._state_known:
-                        logger.debug("Skip poll %s (no state received yet)", device.name)
+                        # No state known yet — send a probe poll with safe defaults
+                        # so the device responds with 27 10 and we learn its state
+                        mode = VentilationMode.HEAT_EXCHANGER
+                        level = current.fan_level if current.fan_level > 0 else 2
                     else:
-                        current = self._states.get(device.name, VentilationState())
-                        device_id = str_to_id(device.device_id)
+                        level = current.fan_level
                         if current.mode == VentilationMode.BOOST:
                             mode = VentilationMode.SUMMER  # Boost = Durchluft
                         elif current.mode in (VentilationMode.HEAT_EXCHANGER, VentilationMode.SUMMER):
                             mode = current.mode
                         else:
                             mode = VentilationMode.HEAT_EXCHANGER
-                        data, optional = build_set_level(
-                            self.serial.base_id, device_id, current.fan_level, mode
-                        )
-                        self.serial.send(data, optional)
-                        logger.debug("Poll %s (level %d, %s)", device.name, current.fan_level, mode.value)
+                    device_id = str_to_id(device.device_id)
+                    data, optional = build_set_level(
+                        self.serial.base_id, device_id, level, mode
+                    )
+                    self.serial.send(data, optional)
+                    logger.debug("Poll %s (level %d, %s)", device.name, level, mode.value)
 
                     # Update timer sensor if active
                     remaining = self.timer_remaining_minutes(device.name)

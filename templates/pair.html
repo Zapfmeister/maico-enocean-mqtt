@@ -2,18 +2,30 @@
 {% block title %}{{ t.pairing }} - {{ t.brand }}{% endblock %}
 
 {% block content %}
-<h1 style="margin-bottom: 16px;">{{ t.pair_title }}</h1>
+<h1 style="margin-bottom: 16px;">{{ t.pairing }}</h1>
 
-<div class="card">
-    <h2>{{ t.pair_instructions }}</h2>
-    <ol style="padding-left: 20px; line-height: 1.8;">
-        <li>{{ t.pair_step1 | safe }}</li>
-        <li>{{ t.pair_step2 | safe }}</li>
-    </ol>
+{# ===== Polling Pause/Resume ===== #}
+<div class="card" id="polling-card" style="background: {% if polling_paused %}#fff3cd{% else %}#d4edda{% endif %};">
+    <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
+        <div>
+            <strong id="polling-label">{% if polling_paused %}{{ t.polling_paused }}{% else %}{{ t.polling_active }}{% endif %}</strong>
+            <p class="meta" style="margin-top: 4px;">{{ t.polling_pause_hint }}</p>
+        </div>
+        <button class="btn {% if polling_paused %}btn-primary{% else %}btn-danger{% endif %}" id="polling-btn" onclick="togglePolling()">
+            {% if polling_paused %}{{ t.polling_resume }}{% else %}{{ t.polling_pause }}{% endif %}
+        </button>
+    </div>
 </div>
 
+{# ===== PP 45 RC Section ===== #}
 <div class="card">
-    <h2>{{ t.scan }}</h2>
+    <h2>{{ t.pp45_pair_title }}</h2>
+    <p class="meta" style="margin-bottom: 12px;">{{ t.pp45_pair_desc }}</p>
+    <ol style="padding-left: 20px; line-height: 1.8; margin-bottom: 16px;">
+        <li>{{ t.pair_step1 | safe }}</li>
+        <li>{{ t.pair_step2 | safe }}</li>
+        <li>{{ t.pair_step3 | safe }}</li>
+    </ol>
     <button class="btn btn-primary" id="scan-btn" onclick="startScan()">{{ t.scan_start }}</button>
     <div id="scan-status" style="margin-top: 12px;"></div>
     <div id="scan-results" style="margin-top: 12px; display: none;"></div>
@@ -36,6 +48,55 @@
     <button class="btn btn-primary" onclick="saveDevice()">{{ t.save }}</button>
     <div id="save-status" style="margin-top: 8px;"></div>
 </div>
+
+{# ===== Slave am Master einlernen ===== #}
+<div class="card">
+    <h2>{{ t.pp45_slave_title }}</h2>
+    <p class="meta" style="margin-bottom: 12px;">{{ t.pp45_slave_desc }}</p>
+    <ol style="padding-left: 20px; line-height: 1.8;">
+        <li>{{ t.pp45_slave_step1 | safe }}</li>
+        <li>{{ t.pp45_slave_step2 | safe }}</li>
+        <li>{{ t.pp45_slave_step3 | safe }}</li>
+        <li>{{ t.pp45_slave_step4 | safe }}</li>
+        <li>{{ t.pp45_slave_step5 | safe }}</li>
+        <li>{{ t.pp45_slave_step6 | safe }}</li>
+    </ol>
+</div>
+
+{# ===== Tastenkombinationen ===== #}
+<div class="card" style="background: #fff8e1;">
+    <h2>{{ t.pp45_reset_title }}</h2>
+    <p class="meta" style="margin-bottom: 12px;">{{ t.pp45_reset_desc }}</p>
+    <ul style="padding-left: 20px; line-height: 2.0; list-style: none;">
+        <li>{{ t.pp45_reset_learn | safe }}</li>
+        <li>{{ t.pp45_reset_delete | safe }}</li>
+        <li>{{ t.pp45_reset_rep_off | safe }}</li>
+        <li>{{ t.pp45_reset_rep1 | safe }}</li>
+        <li>{{ t.pp45_reset_rep2 | safe }}</li>
+    </ul>
+    <div class="alert" style="background: #f8d7da; color: #721c24; margin-top: 12px;">
+        {{ t.pp45_reset_warning }}
+    </div>
+</div>
+
+<hr style="border: none; border-top: 2px solid #e0e0e0; margin: 24px 0;">
+
+{# ===== RLS 45 K Section ===== #}
+<div class="card">
+    <h2>{{ t.rls_pair_title }}</h2>
+    <p class="meta" style="margin-bottom: 12px;">{{ t.rls_pair_desc }}</p>
+    {% if rls_device_id %}
+    <div class="alert alert-info" style="margin-bottom: 12px;">
+        {{ t.rls_device_id }}: <strong>{{ rls_device_id }}</strong>
+    </div>
+    {% endif %}
+    <ol style="padding-left: 20px; line-height: 1.8; margin-bottom: 16px;">
+        <li>{{ t.rls_pair_step1 | safe }}</li>
+        <li>{{ t.rls_pair_step2 | safe }}</li>
+    </ol>
+    <button class="btn btn-primary" id="rls-btn" onclick="startRlsScan()">{{ t.rls_pair_btn }}</button>
+    <div id="rls-status" style="margin-top: 12px;"></div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -47,6 +108,45 @@ const t_scan_found = {{ t.scan_found | tojson }};
 const t_scan_not_found = {{ t.scan_not_found | tojson }};
 const t_device_saved = {{ t.device_saved | tojson }};
 const t_name_required = {{ t.name_required | tojson }};
+const t_rls_pair_btn = {{ t.rls_pair_btn | tojson }};
+const t_rls_scanning = {{ t.rls_scanning | tojson }};
+const t_rls_found = {{ t.rls_found | tojson }};
+const t_rls_not_found = {{ t.rls_not_found | tojson }};
+const t_polling_pause = {{ t.polling_pause | tojson }};
+const t_polling_resume = {{ t.polling_resume | tojson }};
+const t_polling_paused = {{ t.polling_paused | tojson }};
+const t_polling_active = {{ t.polling_active | tojson }};
+
+let pollingPaused = {{ polling_paused | tojson }};
+
+async function togglePolling() {
+    const btn = document.getElementById('polling-btn');
+    const label = document.getElementById('polling-label');
+    const card = document.getElementById('polling-card');
+    btn.disabled = true;
+
+    try {
+        const url = pollingPaused ? '/api/polling/resume' : '/api/polling/pause';
+        const resp = await fetch(url, {method: 'POST'});
+        const data = await resp.json();
+        pollingPaused = data.status === 'paused' || data.paused === true;
+    } catch (e) {
+        // ignore
+    }
+
+    if (pollingPaused) {
+        card.style.background = '#fff3cd';
+        label.textContent = t_polling_paused;
+        btn.textContent = t_polling_resume;
+        btn.className = 'btn btn-primary';
+    } else {
+        card.style.background = '#d4edda';
+        label.textContent = t_polling_active;
+        btn.textContent = t_polling_pause;
+        btn.className = 'btn btn-danger';
+    }
+    btn.disabled = false;
+}
 
 async function startScan() {
     const btn = document.getElementById('scan-btn');
@@ -114,6 +214,31 @@ async function saveDevice() {
     } catch (e) {
         document.getElementById('save-status').innerHTML = `<span style="color:red;">${e.message}</span>`;
     }
+}
+
+async function startRlsScan() {
+    const btn = document.getElementById('rls-btn');
+    const status = document.getElementById('rls-status');
+
+    btn.disabled = true;
+    btn.textContent = t_rls_scanning;
+    status.innerHTML = `<p>${t_rls_scanning}</p>`;
+
+    try {
+        const resp = await fetch('/api/pair/rls', {method: 'POST'});
+        const data = await resp.json();
+
+        if (data.found_devices && data.found_devices.length > 0) {
+            status.innerHTML = `<div class="alert alert-success">${t_rls_found} (${data.found_devices[0]})</div>`;
+        } else {
+            status.innerHTML = `<div class="alert alert-info">${t_rls_not_found}</div>`;
+        }
+    } catch (e) {
+        status.innerHTML = `<div class="alert" style="background:#f8d7da;color:#721c24;">Error: ${e.message}</div>`;
+    }
+
+    btn.disabled = false;
+    btn.textContent = t_rls_pair_btn;
 }
 </script>
 {% endblock %}

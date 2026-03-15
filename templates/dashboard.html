@@ -111,6 +111,22 @@
 {% endif %}
 
 </div>
+
+{% if rls %}
+<div class="card" style="margin-top: 16px; border-left: 3px solid #e67e22;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+        <h2 style="margin: 0;">{{ t.rls_status }}</h2>
+        <span class="status-badge status-on">{{ t.rls_connected }}</span>
+    </div>
+    <p class="meta">{{ rls.device_id }}</p>
+    <div class="device-info">
+        {% if rls.level is not none %}
+        <div class="info-row"><span class="info-label">{{ t.rls_last_level }}:</span> {{ rls.level }}</div>
+        {% endif %}
+        <div class="info-row"><span class="info-label">{{ t.rls_global_sync }}:</span> {% if rls.sync_enabled %}{{ t.on }}{% else %}{{ t.off }}{% endif %}</div>
+    </div>
+</div>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}

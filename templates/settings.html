@@ -53,6 +53,22 @@
     </div>
 
     <div class="card">
+        <h2>RLS</h2>
+        <div class="form-group">
+            <label>
+                <input type="checkbox" name="rls_global_sync" {% if config.rls_global_sync %}checked{% endif %}>
+                {{ t.rls_global_sync }}
+            </label>
+        </div>
+        {% if config.remote.device_id %}
+        <div class="form-group">
+            <label>{{ t.rls_device_id }}</label>
+            <input type="text" value="{{ config.remote.device_id }}" readonly style="background: #f5f5f5;">
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="card">
         <h2>{{ t.enocean_readonly }}</h2>
         <div class="form-group">
             <label>{{ t.serial_port }}</label>

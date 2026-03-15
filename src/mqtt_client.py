@@ -272,6 +272,16 @@ class MqttClient:
                               ("sensor", "_last_seen"), ("sensor", "_timer")]:
             self._client.publish(f"{ha}/{comp}/{uid}{suffix}/config", "", retain=True)
 
+    def clear_device_topics(self, device_name: str) -> None:
+        """Clear retained MQTT state topics for a device (after rename/remove)."""
+        if not self._client:
+            return
+        prefix = self.config.mqtt.topic_prefix
+        t = f"{prefix}/{device_name}"
+        for suffix in ["/state", "/percentage", "/direction", "/mode",
+                       "/json", "/connection", "/role", "/last_seen", "/timer"]:
+            self._client.publish(f"{t}{suffix}", "", retain=True)
+
     def _publish_bridge_discovery(self) -> None:
         if not self._client:
             return

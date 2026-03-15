@@ -74,8 +74,9 @@ TRANSLATIONS = {
         # Pair page
         "pair_title": "Geräte anlernen",
         "pair_instructions": "Anleitung",
-        "pair_step1": "Am PP 45 RC: Learn-Taste <strong>2 Sekunden halten</strong> bis alle 3 LEDs blinken",
+        "pair_step1": "Am PP 45 RC: Learn-Taste <strong>2s halten</strong> — alle 3 LEDs blinken (Empfangsmodus)",
         "pair_step2": 'Klicke unten auf <strong>"Scan starten"</strong>',
+        "pair_step3": "Gerät wird innerhalb von 30 Sekunden erkannt",
         "scan": "Scan",
         "scan_start": "Scan starten",
         "scanning": "Scanne...",
@@ -103,6 +104,43 @@ TRANSLATIONS = {
         "enocean_readonly": "EnOcean (read-only)",
         "serial_port": "Serial Port",
         "language_label": "Sprache (System + Home Assistant)",
+        "rls_status": "RLS 45 K",
+        "rls_connected": "Verbunden",
+        "rls_not_connected": "Nicht verbunden",
+        "rls_last_level": "Aktuelle Stufe",
+        "rls_global_sync": "RLS steuert alle Geräte",
+        "rls_pair_title": "RLS 45 K Fernbedienung anlernen",
+        "rls_pair_desc": "Damit die Bridge Befehle der Wandfernbedienung empfängt, muss die RLS mit der Bridge gepairt werden. Die Bridge gibt sich dabei als PP 45 Gerät aus.",
+        "rls_pair_btn": "RLS anlernen",
+        "rls_pair_step1": 'Klicke unten auf <strong>"RLS anlernen"</strong> (Bridge wartet auf RLS-Scan)',
+        "rls_pair_step2": "Am RLS 45 K: <strong>Anlern-Taste drücken</strong> um den Scan zu senden",
+        "rls_scanning": "Warte auf RLS-Scan...",
+        "rls_found": "RLS gefunden und gepairt!",
+        "rls_not_found": "Kein RLS gefunden. Ist die Fernbedienung im Anlernmodus?",
+        "rls_device_id": "RLS Device-ID",
+        "pp45_pair_title": "PP 45 RC Lüfter anlernen",
+        "pp45_pair_desc": "Neue Lüftungsgeräte mit der Bridge verbinden. Nach dem Anlernen kann die Bridge die Geräte direkt steuern.",
+        "polling_pause": "Funkverkehr pausieren",
+        "polling_resume": "Funkverkehr fortsetzen",
+        "polling_paused": "Funkverkehr ist pausiert — Bridge sendet keine Telegramme.",
+        "polling_active": "Funkverkehr aktiv",
+        "polling_pause_hint": "Vor dem Zurücksetzen der Geräte den Funkverkehr pausieren, damit die Bridge die Geräte nicht sofort wieder anlernt.",
+        "pp45_slave_title": "Slave am Master einlernen",
+        "pp45_slave_desc": "Ein Lüftungsgerät wird automatisch zum Master, wenn es im Empfangsmodus ein Einlerntelegramm von einem Slave empfängt. Jedem Master kann nur 1 Slave zugeordnet werden.",
+        "pp45_slave_step1": "Frontabdeckung an beiden Geräten entfernen",
+        "pp45_slave_step2": "<strong>Master</strong> in Einlernmodus: Learn-Taste <strong>2s halten</strong> — alle 3 LEDs blinken (120s Timeout)",
+        "pp45_slave_step3": "<strong>Slave</strong> in Einlernmodus: Learn-Taste <strong>2s halten</strong> — alle 3 LEDs blinken",
+        "pp45_slave_step4": "Am <strong>Slave</strong> Send-Learn-Modus: Learn-Taste <strong>1× kurz</strong> drücken",
+        "pp45_slave_step5": "Am <strong>Slave</strong> Telegramm senden: Learn-Taste <strong>ca. 5s halten</strong> — LEDs leuchten kurz auf",
+        "pp45_slave_step6": "<strong>30–40 Sekunden warten</strong> — alle LEDs an Master und Slave schalten aus",
+        "pp45_reset_title": "Tastenkombinationen Learn-Taste",
+        "pp45_reset_desc": "Alle Kombinationen beginnen und enden mit Learn-Taste 2s lang halten. Bestätigung abwarten!",
+        "pp45_reset_warning": "Nach dem Löschen ist das Gerät 120 Sekunden im Empfangsmodus. In dieser Zeit darf kein Controller (Bridge, RLS) senden, da das Gerät sich sonst sofort wieder anlernt. Vorher den Funkverkehr oben pausieren!",
+        "pp45_reset_learn": "<strong>Anlernen (1×):</strong> 2s lang, <strong>1× kurz</strong>, 2s lang — Bestätigung: 3 LEDs 1× kurz. Achtung: nicht mit Speicher löschen verwechseln!",
+        "pp45_reset_delete": "<strong>Speicher löschen (2×):</strong> 2s lang, <strong>2× kurz</strong>, 2s lang — Bestätigung: 3 LEDs 1× <strong>lang</strong>. Löscht alle Pairings inkl. Master-Slave-Verbund. An <strong>beiden</strong> Geräten eines Paares durchführen + danach Strom kurz trennen!",
+        "pp45_reset_rep_off": "<strong>Repeater aus:</strong> 2s lang, <strong>3× kurz</strong>, 2s lang",
+        "pp45_reset_rep1": "<strong>Repeater Stufe 1:</strong> 2s lang, 3× kurz, <strong>1× kurz</strong>, 2s lang",
+        "pp45_reset_rep2": "<strong>Repeater Stufe 2:</strong> 2s lang, 3× kurz, <strong>2× kurz</strong>, 2s lang",
         "mode_btn_heat": "Wärmetauscher",
         "mode_btn_summer": "Sommer",
         "mode_btn_sleep": "Schlafen",
@@ -163,8 +201,9 @@ TRANSLATIONS = {
         # Pair page
         "pair_title": "Pair Devices",
         "pair_instructions": "Instructions",
-        "pair_step1": "On PP 45 RC: <strong>Hold Learn button for 2 seconds</strong> until all 3 LEDs blink",
+        "pair_step1": "On PP 45 RC: <strong>hold Learn button for 2s</strong> — all 3 LEDs blink (receive mode)",
         "pair_step2": 'Click <strong>"Start Scan"</strong> below',
+        "pair_step3": "Device is detected within 30 seconds",
         "scan": "Scan",
         "scan_start": "Start Scan",
         "scanning": "Scanning...",
@@ -192,6 +231,43 @@ TRANSLATIONS = {
         "enocean_readonly": "EnOcean (read-only)",
         "serial_port": "Serial Port",
         "language_label": "Language (System + Home Assistant)",
+        "rls_status": "RLS 45 K",
+        "rls_connected": "Connected",
+        "rls_not_connected": "Not connected",
+        "rls_last_level": "Current level",
+        "rls_global_sync": "RLS controls all devices",
+        "rls_pair_title": "RLS 45 K Remote Control",
+        "rls_pair_desc": "Pair the wall remote with the bridge so it can receive RLS commands. The bridge pretends to be a PP 45 device.",
+        "rls_pair_btn": "Pair RLS",
+        "rls_pair_step1": 'Click <strong>"Pair RLS"</strong> below (bridge waits for RLS scan)',
+        "rls_pair_step2": "On RLS 45 K: <strong>press learn button</strong> to send the scan",
+        "rls_scanning": "Waiting for RLS scan...",
+        "rls_found": "RLS found and paired!",
+        "rls_not_found": "No RLS found. Is the remote in pairing mode?",
+        "rls_device_id": "RLS Device ID",
+        "pp45_pair_title": "PP 45 RC Ventilation Units",
+        "pp45_pair_desc": "Pair new ventilation units with the bridge. After pairing, the bridge can control the devices directly.",
+        "polling_pause": "Pause radio traffic",
+        "polling_resume": "Resume radio traffic",
+        "polling_paused": "Radio traffic paused — bridge is not sending any telegrams.",
+        "polling_active": "Radio traffic active",
+        "polling_pause_hint": "Pause radio traffic before resetting devices, so the bridge does not re-pair them immediately.",
+        "pp45_slave_title": "Pair slave to master",
+        "pp45_slave_desc": "A device automatically becomes a master when it receives a pairing telegram from a slave in receive mode. Each master supports only 1 slave.",
+        "pp45_slave_step1": "Remove front cover from both devices",
+        "pp45_slave_step2": "<strong>Master</strong> learn mode: hold Learn button <strong>2s</strong> — all 3 LEDs blink (120s timeout)",
+        "pp45_slave_step3": "<strong>Slave</strong> learn mode: hold Learn button <strong>2s</strong> — all 3 LEDs blink",
+        "pp45_slave_step4": "On <strong>Slave</strong> send-learn mode: press Learn button <strong>1× short</strong>",
+        "pp45_slave_step5": "On <strong>Slave</strong> send telegram: hold Learn button <strong>~5s</strong> — LEDs flash briefly",
+        "pp45_slave_step6": "<strong>Wait 30–40 seconds</strong> — all LEDs on master and slave turn off",
+        "pp45_reset_title": "Learn button combinations",
+        "pp45_reset_desc": "All combinations start and end with holding Learn button for 2s.",
+        "pp45_reset_warning": "After clearing, the device listens for 120 seconds. No controller (bridge, RLS) may send during this time, or the device will re-pair automatically. Pause radio traffic above first!",
+        "pp45_reset_learn": "<strong>Pairing (1×):</strong> hold 2s, <strong>1× short</strong>, hold 2s — confirmation: 3 LEDs 1× short. Do not confuse with clear memory!",
+        "pp45_reset_delete": "<strong>Clear memory (2×):</strong> hold 2s, <strong>2× short</strong>, hold 2s — confirmation: 3 LEDs 1× <strong>long</strong>. Clears all pairings incl. master-slave. Do on <strong>both</strong> devices of a pair + briefly disconnect power afterwards!",
+        "pp45_reset_rep_off": "<strong>Repeater off:</strong> hold 2s, <strong>3× short</strong>, hold 2s",
+        "pp45_reset_rep1": "<strong>Repeater level 1:</strong> hold 2s, 3× short, <strong>1× short</strong>, hold 2s",
+        "pp45_reset_rep2": "<strong>Repeater level 2:</strong> hold 2s, 3× short, <strong>2× short</strong>, hold 2s",
         "mode_btn_heat": "Heat Exchanger",
         "mode_btn_summer": "Summer",
         "mode_btn_sleep": "Sleep",
@@ -334,6 +410,16 @@ def create_web_app(bridge: "MaicoMqttBridge") -> FastAPI:
                 standalone.append(dev)
 
         t = _get_lang(request, default_lang)
+        rls_info = None
+        if bridge.config.remote.device_id:
+            rls_last = bridge._last_rls_state
+            rls_info = {
+                "device_id": bridge.config.remote.device_id,
+                "level": rls_last.fan_level if rls_last else None,
+                "mode": rls_last.mode.value if rls_last else None,
+                "sync_enabled": bridge.config.rls_global_sync,
+            }
+
         return templates.TemplateResponse("dashboard.html", {
             "request": request,
             "pairs": pairs,
@@ -343,6 +429,7 @@ def create_web_app(bridge: "MaicoMqttBridge") -> FastAPI:
             "t": t,
             "mode_labels": t["mode_labels"],
             "direction_labels": t["direction_labels"],
+            "rls": rls_info,
         })
 
     # --- Pairing ---
@@ -352,7 +439,12 @@ def create_web_app(bridge: "MaicoMqttBridge") -> FastAPI:
         if not _check_auth(request):
             return RedirectResponse("/login", status_code=302)
         t = _get_lang(request, default_lang)
-        return templates.TemplateResponse("pair.html", {"request": request, "t": t})
+        return templates.TemplateResponse("pair.html", {
+            "request": request,
+            "t": t,
+            "rls_device_id": bridge.config.remote.device_id or "",
+            "polling_paused": bridge._polling_paused,
+        })
 
     @app.post("/api/pair")
     async def api_pair(request: Request):
@@ -405,6 +497,44 @@ def create_web_app(bridge: "MaicoMqttBridge") -> FastAPI:
 
         return JSONResponse({"status": "saved", "name": name})
 
+    # --- Polling control ---
+
+    @app.post("/api/polling/pause")
+    async def api_polling_pause(request: Request):
+        if not _check_auth(request):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        bridge._polling_paused = True
+        logger.info("Polling paused via Web-UI")
+        return JSONResponse({"status": "paused"})
+
+    @app.post("/api/polling/resume")
+    async def api_polling_resume(request: Request):
+        if not _check_auth(request):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        bridge._polling_paused = False
+        logger.info("Polling resumed via Web-UI")
+        return JSONResponse({"status": "active"})
+
+    @app.get("/api/polling/status")
+    async def api_polling_status(request: Request):
+        if not _check_auth(request):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        return JSONResponse({"paused": bridge._polling_paused})
+
+    # --- RLS Pairing ---
+
+    @app.post("/api/pair/rls")
+    async def api_pair_rls(request: Request):
+        if not _check_auth(request):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        from .teach_in import run_rls_teach_in
+        result = await run_rls_teach_in(bridge, timeout=30)
+        return JSONResponse({
+            "status": result.status,
+            "found_devices": result.found_devices,
+            "error": result.error,
+        })
+
     # --- Settings ---
 
     @app.get("/settings", response_class=HTMLResponse)
@@ -430,6 +560,7 @@ def create_web_app(bridge: "MaicoMqttBridge") -> FastAPI:
         poll_interval: int = Form(10),
         web_password: str = Form(""),
         language: str = Form("de"),
+        rls_global_sync: str = Form(""),
     ):
         if not _check_auth(request):
             return RedirectResponse("/login", status_code=302)
@@ -446,6 +577,7 @@ def create_web_app(bridge: "MaicoMqttBridge") -> FastAPI:
             bridge.config.web.password = web_password
         if language in ("de", "en"):
             bridge.config.language = language
+        bridge.config.rls_global_sync = rls_global_sync == "on"
 
         bridge.config.save()
 
@@ -515,6 +647,14 @@ def create_web_app(bridge: "MaicoMqttBridge") -> FastAPI:
         device = bridge.config.get_device_by_name(name)
         if device:
             bridge.mqtt.remove_device_discovery(device)
+            bridge.mqtt.clear_device_topics(device.name)
+            # Clean up internal mappings
+            dev_id = device.device_id.upper().replace(":", "")
+            bridge._id_to_name.pop(dev_id, None)
+            bridge._name_to_config.pop(device.name, None)
+            bridge._states.pop(device.name, None)
+            bridge._device_status.pop(device.name, None)
+            bridge._state_known.discard(device.name)
             bridge.config.remove_device(name)
             bridge.config.save()
             return JSONResponse({"status": "removed"})
@@ -528,14 +668,38 @@ def create_web_app(bridge: "MaicoMqttBridge") -> FastAPI:
         body = await _parse_json(request)
         if body is None:
             return JSONResponse({"error": "invalid JSON"}, status_code=400)
-        new_name = body.get("friendly_name", "")
+        new_friendly = body.get("friendly_name", "")
+        new_internal = body.get("name", "")
         device = bridge.config.get_device_by_name(name)
-        if device and new_name:
-            device.friendly_name = new_name
-            bridge.config.save()
-            bridge.mqtt.publish_device_discovery(device)
-            return JSONResponse({"status": "renamed"})
-        return JSONResponse({"error": "not found or no name"}, status_code=400)
+        if not device or (not new_friendly and not new_internal):
+            return JSONResponse({"error": "not found or no name"}, status_code=400)
+
+        # Remove old discovery entries first
+        bridge.mqtt.remove_device_discovery(device)
+
+        old_name = device.name
+        if new_friendly:
+            device.friendly_name = new_friendly
+        if new_internal and new_internal != old_name:
+            # Update internal name — migrate all bridge mappings
+            device.name = new_internal
+            dev_id = device.device_id.upper().replace(":", "")
+            bridge._id_to_name[dev_id] = new_internal
+            bridge._name_to_config.pop(old_name, None)
+            bridge._name_to_config[new_internal] = device
+            state = bridge._states.pop(old_name, None)
+            if state:
+                bridge._states[new_internal] = state
+            status = bridge._device_status.pop(old_name, None)
+            if status:
+                bridge._device_status[new_internal] = status
+            # Clean old MQTT retained state topics
+            bridge.mqtt.clear_device_topics(old_name)
+
+        bridge.config.save()
+        # Publish fresh discovery with new name
+        bridge.mqtt.publish_device_discovery(device)
+        return JSONResponse({"status": "renamed"})
 
     # --- API ---
 

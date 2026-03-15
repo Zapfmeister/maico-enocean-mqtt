@@ -61,6 +61,7 @@ class AppConfig:
     web: WebConfig = field(default_factory=WebConfig)
     poll_interval: int = 10
     language: str = "de"
+    rls_global_sync: bool = False
     config_path: str = "/data/config.yaml"
 
     def get_device_by_name(self, name: str) -> DeviceConfig | None:
@@ -131,6 +132,7 @@ class AppConfig:
             },
             "poll_interval": self.poll_interval,
             "language": self.language,
+            "rls_global_sync": self.rls_global_sync,
         }
 
         try:
@@ -188,6 +190,13 @@ def load_config(path: str | None = None) -> AppConfig:
         "MAICO_POLL_INTERVAL", raw.get("poll_interval", 10),
     ))
     cfg.language = os.environ.get("MAICO_LANGUAGE", raw.get("language", "de"))
+    rls_sync_env = os.environ.get("MAICO_RLS_GLOBAL_SYNC", "").lower()
+    if rls_sync_env in ("true", "1", "yes"):
+        cfg.rls_global_sync = True
+    elif rls_sync_env in ("false", "0", "no"):
+        cfg.rls_global_sync = False
+    else:
+        cfg.rls_global_sync = bool(raw.get("rls_global_sync", False))
 
     # Devices — flat list, no master/slave distinction
     for dev_raw in raw.get("devices", []):
