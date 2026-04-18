@@ -20,4 +20,7 @@ RUN chmod +x ./run.sh
 
 EXPOSE 8080
 
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD python3 -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/healthz', timeout=4).status == 200 else 1)"
+
 ENTRYPOINT ["./run.sh"]

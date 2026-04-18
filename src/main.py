@@ -64,6 +64,8 @@ class ConnectionStatus:
 
 
 SYNC_ROLE_TIMEOUT = 120  # seconds without sync before role resets
+DEVICE_OFFLINE_TIMEOUT = 300  # seconds without any traffic before HA marks unavailable
+AVAILABILITY_CHECK_INTERVAL = 30  # how often to re-evaluate per-device availability
 
 # IDs that must never be treated as devices
 _INVALID_DEVICE_IDS: set[str] = {
@@ -151,6 +153,8 @@ class MaicoMqttBridge:
         self._rls_teach_in_result: str | None = None
         self._polling_paused: bool = False
         self._poll_skip_until: float = 0.0  # skip polls until this timestamp (after RLS sync)
+        self._availability: dict[str, bool] = {}  # last-published availability per device
+        self._availability_task: asyncio.Task | None = None
 
     @property
     def states(self) -> dict[str, VentilationState]:
@@ -357,6 +361,9 @@ class MaicoMqttBridge:
                         name, ds.connection, state.mode.value, state.fan_level,
                         state.direction.value)
 
+        # Device is definitely reachable — update availability immediately
+        self._publish_availability_if_changed(name)
+
     def _send_rls_status_report(self, state: VentilationState) -> None:
         """Send 27 10 status report back to RLS, pretending to be a PP 45."""
         if not self.serial.base_id or not self.config.remote.device_id:
@@ -471,6 +478,8 @@ class MaicoMqttBridge:
                             self.mqtt.publish_state(dev_name, state)
                             logger.info("%s from sync: dir=%s level=%d",
                                         dev_name, direction.value, level)
+                        # Any sync traffic proves reachability (even for slaves)
+                        self._publish_availability_if_changed(dev_name)
 
     def _handle_teach_in_response(self, sender_str: str, dest: list[int] | None) -> None:
         logger.info("Teach-in response from %s!", sender_str)
@@ -665,6 +674,32 @@ class MaicoMqttBridge:
         logger.info("Teach-in scan sent")
         return True
 
+    def _evaluate_device_availability(self, device_name: str, now: float | None = None) -> bool:
+        """Return True if device should be considered available in HA."""
+        if now is None:
+            now = time.time()
+        ds = self._device_status.get(device_name)
+        if not ds:
+            return False
+        # Available if we've seen any traffic recently (status report, sync, or response)
+        last = max(ds.last_seen, ds.last_sync)
+        return last > 0 and (now - last) < DEVICE_OFFLINE_TIMEOUT
+
+    def _publish_availability_if_changed(self, device_name: str) -> None:
+        """Evaluate and publish device availability, only when it changes."""
+        online = self._evaluate_device_availability(device_name)
+        if self._availability.get(device_name) != online:
+            self._availability[device_name] = online
+            self.mqtt.publish_device_availability(device_name, online)
+            logger.info("%s availability → %s", device_name, "online" if online else "offline")
+
+    async def _availability_loop(self) -> None:
+        """Periodically re-evaluate device availability and republish changes."""
+        while self._running:
+            for device in self.config.devices:
+                self._publish_availability_if_changed(device.name)
+            await asyncio.sleep(AVAILABILITY_CHECK_INTERVAL)
+
     async def _poll_loop(self) -> None:
         """Poll all configured devices with staggered 27 20 commands."""
         devices = self.config.devices
@@ -749,6 +784,7 @@ class MaicoMqttBridge:
             logger.info("EnOcean base ID: %s", self.serial.base_id_str)
 
         self._poll_task = asyncio.create_task(self._poll_loop())
+        self._availability_task = asyncio.create_task(self._availability_loop())
 
         try:
             await self.serial.start_receive_loop()
@@ -758,6 +794,8 @@ class MaicoMqttBridge:
             self._running = False
             if self._poll_task:
                 self._poll_task.cancel()
+            if self._availability_task:
+                self._availability_task.cancel()
             try:
                 self.serial.close()
             except Exception:

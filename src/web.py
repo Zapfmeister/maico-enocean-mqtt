@@ -777,6 +777,21 @@ def create_web_app(bridge: "MaicoMqttBridge") -> FastAPI:
             "poll_interval": bridge.config.poll_interval,
         })
 
+    @app.get("/healthz")
+    async def healthz():
+        """Liveness probe for Docker/Kubernetes. No auth required."""
+        serial_ok = bool(bridge.serial and bridge.serial.base_id)
+        mqtt_ok = bool(bridge.mqtt._connected)
+        poll_ok = bool(bridge._poll_task and not bridge._poll_task.done())
+        healthy = serial_ok and mqtt_ok and poll_ok
+        body = {
+            "healthy": healthy,
+            "serial": serial_ok,
+            "mqtt": mqtt_ok,
+            "poll": poll_ok,
+        }
+        return JSONResponse(body, status_code=200 if healthy else 503)
+
     return app
 
 

@@ -217,6 +217,17 @@ class MqttClient:
         last_seen = status.last_seen_ago
         self._client.publish(f"{t}/last_seen", last_seen if last_seen >= 0 else "unknown", retain=True)
 
+    def publish_device_availability(self, device_name: str, online: bool) -> None:
+        """Publish per-device availability (online/offline) for HA entity state."""
+        if not self._client or not self._connected:
+            return
+        prefix = self.config.mqtt.topic_prefix
+        self._client.publish(
+            f"{prefix}/{device_name}/availability",
+            "online" if online else "offline",
+            retain=True,
+        )
+
     def publish_timer(self, device_name: str, remaining_minutes: int) -> None:
         """Publish remaining timer minutes for sleep/boost mode."""
         if not self._client or not self._connected:
@@ -279,7 +290,8 @@ class MqttClient:
         prefix = self.config.mqtt.topic_prefix
         t = f"{prefix}/{device_name}"
         for suffix in ["/state", "/percentage", "/direction", "/mode",
-                       "/json", "/connection", "/role", "/last_seen", "/timer"]:
+                       "/json", "/connection", "/role", "/last_seen", "/timer",
+                       "/availability"]:
             self._client.publish(f"{t}{suffix}", "", retain=True)
 
     def _publish_bridge_discovery(self) -> None:
@@ -312,6 +324,19 @@ class MqttClient:
             json.dumps(payload), retain=True,
         )
 
+    def _availability_block(self, device_name: str) -> dict:
+        """Return availability config combining bridge + device status (both must be online)."""
+        prefix = self.config.mqtt.topic_prefix
+        return {
+            "availability": [
+                {"topic": f"{prefix}/bridge/status",
+                 "payload_available": "online", "payload_not_available": "offline"},
+                {"topic": f"{prefix}/{device_name}/availability",
+                 "payload_available": "online", "payload_not_available": "offline"},
+            ],
+            "availability_mode": "all",
+        }
+
     def _publish_fan_discovery(self, device: DeviceConfig) -> None:
         if not self._client:
             return
@@ -334,9 +359,7 @@ class MqttClient:
             "command_topic": f"{dt}/set/power",
             "payload_on": "ON",
             "payload_off": "OFF",
-            "availability_topic": f"{prefix}/bridge/status",
-            "payload_available": "online",
-            "payload_not_available": "offline",
+            **self._availability_block(device.name),
             "device": {
                 "identifiers": [f"maico_{device.device_id}"],
                 "name": f"MAICO {device.friendly_name or device.name}",
@@ -365,7 +388,7 @@ class MqttClient:
             "command_topic": f"{dt}/set/mode",
             "options": self._i18n["options"],
             "icon": "mdi:heat-wave",
-            "availability_topic": f"{prefix}/bridge/status",
+            **self._availability_block(device.name),
             "device": {
                 "identifiers": [f"maico_{device.device_id}"],
             },
@@ -386,7 +409,7 @@ class MqttClient:
             "object_id": uid,
             "state_topic": f"{dt}/direction",
             "icon": "mdi:air-filter",
-            "availability_topic": f"{prefix}/bridge/status",
+            **self._availability_block(device.name),
             "device": {
                 "identifiers": [f"maico_{device.device_id}"],
             },
@@ -412,6 +435,8 @@ class MqttClient:
             "icon": "mdi:link-variant",
             "entity_category": "diagnostic",
             "availability_topic": f"{prefix}/bridge/status",
+            "payload_available": "online",
+            "payload_not_available": "offline",
             "device": {
                 "identifiers": [f"maico_{device.device_id}"],
             },
@@ -478,7 +503,7 @@ class MqttClient:
             "state_topic": f"{dt}/timer",
             "unit_of_measurement": "min",
             "icon": "mdi:timer-outline",
-            "availability_topic": f"{prefix}/bridge/status",
+            **self._availability_block(device.name),
             "device": {
                 "identifiers": [f"maico_{device.device_id}"],
             },
