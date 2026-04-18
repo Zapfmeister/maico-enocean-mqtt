@@ -58,31 +58,60 @@ def build_esp3_packet(data: list[int], optional: list[int], packet_type: int = P
     return bytes(header + [header_crc] + data + optional + [data_crc])
 
 
-def parse_esp3_packets(raw: bytes) -> list[dict]:
-    """Parse raw bytes into ESP3 packets. Returns list of parsed packet dicts."""
-    packets = []
+class ParseResult:
+    """Result of ESP3 packet parsing, tracking consumed bytes."""
+    __slots__ = ('packets', 'consumed')
+
+    def __init__(self) -> None:
+        self.packets: list[dict] = []
+        self.consumed: int = 0
+
+
+def parse_esp3_packets(raw: bytes) -> ParseResult:
+    """Parse raw bytes into ESP3 packets.
+
+    Returns ParseResult with parsed packets and number of bytes safely consumed.
+    Bytes after `consumed` may contain an incomplete packet and must be kept
+    in the buffer for the next read cycle.
+    """
+    result = ParseResult()
     data = list(raw)
     i = 0
+    last_good = 0  # track last position where we know all prior bytes are consumed
+
     while i < len(data):
-        if data[i] != SYNC_BYTE or i + 6 > len(data):
+        if data[i] != SYNC_BYTE:
             i += 1
+            last_good = i
             continue
+
+        if i + 6 > len(data):
+            # Could be start of a packet but not enough header bytes yet
+            break
 
         data_len = (data[i + 1] << 8) | data[i + 2]
         opt_len = data[i + 3]
         pkt_type = data[i + 4]
         header_crc_pos = i + 5
 
+        # Sanity check: reject absurd lengths (max ESP3 data = 65535, but
+        # MAICO MSC packets are always small — cap at 256 to catch corruption)
+        if data_len > 256 or opt_len > 256:
+            i += 1
+            last_good = i
+            continue
+
         # Total packet length: sync(1) + header(4) + header_crc(1) + data + optional + data_crc(1)
         pkt_total = 1 + 4 + 1 + data_len + opt_len + 1
         if i + pkt_total > len(data):
-            i += 1
-            continue
+            # Incomplete packet — keep remaining bytes for next read
+            break
 
         # Verify header CRC
         expected_hcrc = crc8(data[i + 1:i + 5])
         if data[header_crc_pos] != expected_hcrc:
             i += 1
+            last_good = i
             continue
 
         # Extract data and optional sections
@@ -96,6 +125,7 @@ def parse_esp3_packets(raw: bytes) -> list[dict]:
         expected_dcrc = crc8(data[data_start:opt_end])
         if data[data_crc_pos] != expected_dcrc:
             i += 1
+            last_good = i
             continue
 
         pkt_data = data[data_start:data_end]
@@ -108,7 +138,7 @@ def parse_esp3_packets(raw: bytes) -> list[dict]:
             status = pkt_data[-1]
             user_data = pkt_data[1:-5]
             dest = pkt_opt[1:5] if opt_len >= 5 else None
-            packets.append({
+            result.packets.append({
                 'type': 'radio',
                 'rorg': rorg,
                 'sender': sender,
@@ -117,14 +147,16 @@ def parse_esp3_packets(raw: bytes) -> list[dict]:
                 'dest': dest,
             })
         elif pkt_type == PACKET_TYPE_RESPONSE:
-            packets.append({
+            result.packets.append({
                 'type': 'response',
                 'data': pkt_data,
             })
 
         i += pkt_total
+        last_good = i
 
-    return packets
+    result.consumed = last_good
+    return result
 
 
 class EnOceanSerial:
@@ -217,7 +249,7 @@ class EnOceanSerial:
         try:
             if self._ser.in_waiting:
                 raw = self._ser.read(self._ser.in_waiting)
-                for pkt in parse_esp3_packets(raw):
+                for pkt in parse_esp3_packets(raw).packets:
                     if pkt.get('type') == 'response' and len(pkt['data']) >= 5:
                         if pkt['data'][0] == RETURN_CODE_OK:
                             self._base_id = list(pkt['data'][1:5])
@@ -267,20 +299,24 @@ class EnOceanSerial:
                     chunk = self._ser.read(self._ser.in_waiting)
                     buf.extend(chunk)
 
-                    # Try to parse complete packets
-                    packets = parse_esp3_packets(bytes(buf))
-                    if packets:
+                    # Try to parse complete packets, keeping incomplete trailing data
+                    result = parse_esp3_packets(bytes(buf))
+                    if result.consumed > 0:
+                        del buf[:result.consumed]
+                    # Safety: prevent unbounded buffer growth from unparseable data
+                    if len(buf) > 4096:
+                        logger.warning("Serial buffer overflow (%d bytes), clearing", len(buf))
                         buf.clear()
-                        for pkt in packets:
-                            try:
-                                loop = self._loop
-                                queue = self._packet_queue
-                                if loop and queue:
-                                    loop.call_soon_threadsafe(queue.put_nowait, pkt)
-                                else:
-                                    logger.debug("Packet dropped: no event loop or queue")
-                            except RuntimeError:
-                                logger.debug("Packet dropped: event loop closed")
+                    for pkt in result.packets:
+                        try:
+                            loop = self._loop
+                            queue = self._packet_queue
+                            if loop and queue:
+                                loop.call_soon_threadsafe(queue.put_nowait, pkt)
+                            else:
+                                logger.debug("Packet dropped: no event loop or queue")
+                        except RuntimeError:
+                            logger.debug("Packet dropped: event loop closed")
                 else:
                     time.sleep(0.02)
             except serial.SerialException:

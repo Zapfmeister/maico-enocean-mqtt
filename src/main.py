@@ -65,6 +65,28 @@ class ConnectionStatus:
 
 SYNC_ROLE_TIMEOUT = 120  # seconds without sync before role resets
 
+# IDs that must never be treated as devices
+_INVALID_DEVICE_IDS: set[str] = {
+    "FFFFFFFF",  # EnOcean broadcast address
+    "00000000",  # Null address
+}
+
+
+def _is_valid_device_id(device_id_str: str) -> bool:
+    """Check if an EnOcean device ID looks like a real MAICO device.
+
+    Rejects broadcast addresses, null addresses, and IDs with too many
+    0xFF bytes (typically from RF noise or corrupt serial data).
+    """
+    clean = device_id_str.upper().replace(":", "")
+    if clean in _INVALID_DEVICE_IDS:
+        return False
+    # Count 0xFF bytes — real MAICO IDs never have more than one
+    ff_count = sum(1 for i in range(0, 8, 2) if clean[i:i+2] == "FF")
+    if ff_count >= 2:
+        return False
+    return True
+
 @dataclass
 class DeviceStatus:
     connection: str = ConnectionStatus.UNKNOWN
@@ -175,6 +197,11 @@ class MaicoMqttBridge:
             if sender == fake:
                 return
 
+        # Reject packets from invalid sender IDs (broadcast, noise)
+        if not _is_valid_device_id(sender_str):
+            logger.debug("Ignoring packet from invalid sender: %s", sender_str)
+            return
+
         if rorg == RORG_MSC:
             telegram = parse_msc_telegram(user_data, sender, dest)
             if not telegram:
@@ -219,6 +246,11 @@ class MaicoMqttBridge:
             fake[3] = (fake[3] + 1) & 0xFF
             our_fake = id_to_str(fake)
         if device_id_str in (rls_id, our_base, our_fake):
+            return ""
+
+        # Reject invalid/dangerous IDs (broadcast, noise, corrupt data)
+        if not _is_valid_device_id(device_id_str):
+            logger.debug("Auto-discovery rejected invalid ID: %s", device_id_str)
             return ""
 
         # Already known?
@@ -492,6 +524,11 @@ class MaicoMqttBridge:
             logger.error("Cannot set level: device=%s base_id=%s", device_name, self.serial.base_id)
             return False
 
+        if not _is_valid_device_id(device.device_id):
+            logger.warning("Refusing to send to invalid device ID: %s (%s)",
+                           device_name, device.device_id)
+            return False
+
         # Manual level change cancels any active sleep/boost timer
         self._cancel_mode_timer(device_name)
         saved = self._saved_states.pop(device_name, None)
@@ -644,6 +681,12 @@ class MaicoMqttBridge:
                     break
 
                 if self.serial.base_id and not self._polling_paused and time.time() > self._poll_skip_until:
+                    # Safety: never send commands to invalid device IDs
+                    if not _is_valid_device_id(device.device_id):
+                        logger.debug("Poll skipped for invalid device ID: %s (%s)",
+                                     device.name, device.device_id)
+                        continue
+
                     current = self._states.get(device.name, VentilationState())
                     if device.name not in self._state_known:
                         # No state known yet — send a probe poll with safe defaults
