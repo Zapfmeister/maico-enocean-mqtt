@@ -343,7 +343,7 @@ def create_web_app(bridge: "MaicoMqttBridge") -> FastAPI:
         if _check_auth(request):
             return RedirectResponse("/", status_code=302)
         t = _get_lang(request, default_lang)
-        return templates.TemplateResponse("login.html", {"request": request, "error": "", "t": t})
+        return templates.TemplateResponse(request, "login.html", {"error": "", "t": t})
 
     @app.post("/login")
     async def login(request: Request, password: str = Form(...)):
@@ -354,8 +354,8 @@ def create_web_app(bridge: "MaicoMqttBridge") -> FastAPI:
             response.set_cookie(SESSION_COOKIE, token, max_age=SESSION_MAX_AGE, httponly=True)
             return response
         t = _get_lang(request, default_lang)
-        return templates.TemplateResponse("login.html", {
-            "request": request, "error": t["wrong_password"], "t": t,
+        return templates.TemplateResponse(request, "login.html", {
+            "error": t["wrong_password"], "t": t,
         })
 
     @app.get("/logout")
@@ -420,8 +420,7 @@ def create_web_app(bridge: "MaicoMqttBridge") -> FastAPI:
                 "sync_enabled": bridge.config.rls_global_sync,
             }
 
-        return templates.TemplateResponse("dashboard.html", {
-            "request": request,
+        return templates.TemplateResponse(request, "dashboard.html", {
             "pairs": pairs,
             "standalone": standalone,
             "bridge_base_id": bridge.serial.base_id_str if bridge.serial else "N/A",
@@ -439,8 +438,7 @@ def create_web_app(bridge: "MaicoMqttBridge") -> FastAPI:
         if not _check_auth(request):
             return RedirectResponse("/login", status_code=302)
         t = _get_lang(request, default_lang)
-        return templates.TemplateResponse("pair.html", {
-            "request": request,
+        return templates.TemplateResponse(request, "pair.html", {
             "t": t,
             "rls_device_id": bridge.config.remote.device_id or "",
             "polling_paused": bridge._polling_paused,
@@ -543,8 +541,7 @@ def create_web_app(bridge: "MaicoMqttBridge") -> FastAPI:
             return RedirectResponse("/login", status_code=302)
 
         t = _get_lang(request, default_lang)
-        return templates.TemplateResponse("settings.html", {
-            "request": request,
+        return templates.TemplateResponse(request, "settings.html", {
             "config": bridge.config,
             "base_id": bridge.serial.base_id_str if bridge.serial else "N/A",
             "t": t,
@@ -632,8 +629,7 @@ def create_web_app(bridge: "MaicoMqttBridge") -> FastAPI:
             ordered_devices.append(dev)
 
         t = _get_lang(request, default_lang)
-        return templates.TemplateResponse("devices.html", {
-            "request": request,
+        return templates.TemplateResponse(request, "devices.html", {
             "devices": ordered_devices,
             "id_to_name": bridge._id_to_name,
             "t": t,
