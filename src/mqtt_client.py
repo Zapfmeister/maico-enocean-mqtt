@@ -17,7 +17,7 @@ from . import __version__ as sw_version
 import paho.mqtt.client as mqtt
 
 from .config import AppConfig, DeviceConfig
-from .maico_protocol import VentilationMode, VentilationState
+from .maico_protocol import AirflowDirection, VentilationMode, VentilationState
 
 if TYPE_CHECKING:
     from .main import DeviceStatus, MaicoMqttBridge
@@ -52,7 +52,7 @@ _MODE_I18N = {
             VentilationMode.SLEEP_SUMMER: "Schlafen",
             VentilationMode.BOOST: "Stoßlüften",
         },
-        "direction": {"inflow": "Zuluft", "exhaust": "Abluft", "unknown": "Unbekannt", "off": "Aus"},
+        "direction": {"inflow": "Zuluft", "exhaust": "Abluft", "unknown": "Unbekannt", "off": "Aus", "alternating": "Wechselnd"},
         "entity_names": {
             "mode": "Modus",
             "direction": "Luftrichtung",
@@ -78,7 +78,7 @@ _MODE_I18N = {
             VentilationMode.SLEEP_SUMMER: "Sleep",
             VentilationMode.BOOST: "Boost",
         },
-        "direction": {"inflow": "Inflow", "exhaust": "Exhaust", "unknown": "Unknown", "off": "Off"},
+        "direction": {"inflow": "Inflow", "exhaust": "Exhaust", "unknown": "Unknown", "off": "Off", "alternating": "Alternating"},
         "entity_names": {
             "mode": "Mode",
             "direction": "Airflow Direction",
@@ -216,7 +216,17 @@ class MqttClient:
         self._client.publish(f"{t}/state", "ON" if state.is_on else "OFF", retain=True)
         self._client.publish(f"{t}/percentage", state.fan_level, retain=True)
         dir_labels = self._i18n["direction"]
-        direction = dir_labels["off"] if not state.is_on else dir_labels.get(state.direction.value, state.direction.value)
+        if not state.is_on:
+            direction = dir_labels["off"]
+        elif state.direction != AirflowDirection.UNKNOWN:
+            direction = dir_labels.get(state.direction.value, state.direction.value)
+        elif state.mode == VentilationMode.HEAT_EXCHANGER:
+            # Solo units reverse for heat recovery but never broadcast their live
+            # phase (only master/slave pairs do, via 27 00 sync). So instead of
+            # a misleading fixed value, show that the airflow alternates.
+            direction = dir_labels["alternating"]
+        else:
+            direction = dir_labels["unknown"]
         self._client.publish(f"{t}/direction", direction, retain=True)
 
         # Mode for select entity

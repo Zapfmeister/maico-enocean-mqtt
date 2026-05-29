@@ -8,6 +8,24 @@ direction sensor.
 from src.config import AppConfig, DeviceConfig
 from src.main import MaicoMqttBridge
 from src.maico_protocol import AirflowDirection, VentilationMode, VentilationState
+from src.mqtt_client import MqttClient
+
+
+class _Rec:
+    def __init__(self):
+        self.pub = {}
+
+    def publish(self, topic, payload, retain=False):
+        self.pub[topic] = payload
+
+
+def _mqtt():
+    cfg = AppConfig()
+    cfg.devices = [DeviceConfig(name="x", device_id="051EF6BA")]
+    mc = MqttClient(cfg, object())
+    mc._client = _Rec()
+    mc._connected = True
+    return mc
 
 
 def _bridge_with(name, device_id):
@@ -46,3 +64,23 @@ def test_sync_sets_direction():
     bridge._handle_sync("051EA5D9", [0x05, 0x22, 0x96, 0x57],
                         [0x27, 0x00, 0x22, 0x31, 0x00])
     assert bridge._states["leo"].direction == AirflowDirection.INFLOW
+
+
+def test_solo_heat_exchanger_published_as_alternating():
+    mc = _mqtt()
+    mc.publish_state("x", VentilationState(mode=VentilationMode.HEAT_EXCHANGER,
+                                           fan_level=3, direction=AirflowDirection.UNKNOWN))
+    assert mc._client.pub["maico/x/direction"] == "Wechselnd"
+
+
+def test_known_direction_published_as_label():
+    mc = _mqtt()
+    mc.publish_state("x", VentilationState(mode=VentilationMode.HEAT_EXCHANGER,
+                                           fan_level=2, direction=AirflowDirection.INFLOW))
+    assert mc._client.pub["maico/x/direction"] == "Zuluft"
+
+
+def test_off_published_as_off():
+    mc = _mqtt()
+    mc.publish_state("x", VentilationState(mode=VentilationMode.OFF, fan_level=0))
+    assert mc._client.pub["maico/x/direction"] == "Aus"
