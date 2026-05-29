@@ -2,6 +2,7 @@
 
 Publishes per device:
   - Fan entity (On/Off, percentage 0-100 → levels 0-5, presets)
+  - Sensor entity (fan speed 0-100 %, numeric, for history graphs)
   - Select entity (Wärmetauscher / Sommer mode)
   - Sensor entity (airflow direction, read-only)
   - Sensor entity (connection status: managed/passive/unknown, diagnostic)
@@ -60,6 +61,7 @@ _MODE_I18N = {
             "role": "Rolle",
             "last_seen": "Letzter Kontakt",
             "timer": "Timer",
+            "speed": "Drehzahl",
         },
     },
     "en": {
@@ -86,6 +88,7 @@ _MODE_I18N = {
             "role": "Role",
             "last_seen": "Last Seen",
             "timer": "Timer",
+            "speed": "Fan Speed",
         },
     },
 }
@@ -215,6 +218,10 @@ class MqttClient:
 
         self._client.publish(f"{t}/state", "ON" if state.is_on else "OFF", retain=True)
         self._client.publish(f"{t}/percentage", state.fan_level, retain=True)
+        # Numeric speed sensor (0-100 %) for the history graph: the fan entity's
+        # own percentage is only an attribute, so it never shows as a line in the
+        # default recorder view. Levels 0-5 map linearly to 0/20/40/60/80/100 %.
+        self._client.publish(f"{t}/speed_percent", round(state.fan_level / 5 * 100), retain=True)
         dir_labels = self._i18n["direction"]
         if not state.is_on:
             direction = dir_labels["off"]
@@ -298,6 +305,7 @@ class MqttClient:
     def _publish_device_discovery(self, device: DeviceConfig) -> None:
         """Publish all discovery entities for a single device."""
         self._publish_fan_discovery(device)
+        self._publish_speed_sensor_discovery(device)
         self._publish_mode_select_discovery(device)
         self._publish_summer_switch_discovery(device)
         self._publish_mode_button_discovery(device, "sleep", self._i18n["options"][2], "mdi:power-sleep")
@@ -318,7 +326,8 @@ class MqttClient:
             return
         ha = self.config.mqtt.ha_discovery_prefix
         uid = f"maico_{device.name.lower()}"
-        for comp, suffix in [("fan", ""), ("select", "_mode"), ("switch", "_summer"),
+        for comp, suffix in [("fan", ""), ("sensor", "_speed"), ("select", "_mode"),
+                              ("switch", "_summer"),
                               ("button", "_sleep"), ("button", "_boost"),
                               ("sensor", "_direction"), ("sensor", "_connection"),
                               ("sensor", "_role"), ("sensor", "_last_seen"),
@@ -331,7 +340,8 @@ class MqttClient:
             return
         prefix = self.config.mqtt.topic_prefix
         t = f"{prefix}/{device_name}"
-        for suffix in ["/state", "/percentage", "/direction", "/mode", "/summer",
+        for suffix in ["/state", "/percentage", "/speed_percent", "/direction",
+                       "/mode", "/summer",
                        "/json", "/connection", "/role", "/last_seen", "/timer",
                        "/availability"]:
             self._client.publish(f"{t}{suffix}", "", retain=True)
@@ -416,6 +426,30 @@ class MqttClient:
         }
         self._client.publish(f"{ha}/fan/{uid}/config", json.dumps(payload), retain=True)
         logger.info("Discovery: fan %s", device.friendly_name)
+
+    def _publish_speed_sensor_discovery(self, device: DeviceConfig) -> None:
+        """Numeric fan-speed sensor (0-100 %) so the speed shows as a line in history."""
+        if not self._client:
+            return
+        prefix = self.config.mqtt.topic_prefix
+        ha = self.config.mqtt.ha_discovery_prefix
+        uid = f"maico_{device.name.lower()}_speed"
+        dt = f"{prefix}/{device.name}"
+
+        payload = {
+            "name": self._i18n['entity_names']['speed'],
+            "unique_id": uid,
+            "object_id": uid,
+            "state_topic": f"{dt}/speed_percent",
+            "unit_of_measurement": "%",
+            "state_class": "measurement",
+            "icon": "mdi:fan",
+            **self._availability_block(device.name),
+            "device": {
+                "identifiers": [f"maico_{device.device_id}"],
+            },
+        }
+        self._client.publish(f"{ha}/sensor/{uid}/config", json.dumps(payload), retain=True)
 
     def _publish_mode_select_discovery(self, device: DeviceConfig) -> None:
         if not self._client:
