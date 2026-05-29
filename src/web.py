@@ -449,7 +449,14 @@ def create_web_app(bridge: "MaicoMqttBridge") -> FastAPI:
         if not _check_auth(request):
             return JSONResponse({"error": "unauthorized"}, status_code=401)
         from .teach_in import run_teach_in
-        result = await run_teach_in(bridge.serial, timeout=30)
+        # Enable passive auto-discovery only for the duration of the scan window,
+        # so a device that announces itself via traffic during pairing is picked up
+        # while normal operation can never silently register ghost devices.
+        bridge._discovery_enabled = True
+        try:
+            result = await run_teach_in(bridge.serial, timeout=30)
+        finally:
+            bridge._discovery_enabled = False
         return JSONResponse({
             "status": result.status,
             "found_devices": result.found_devices,

@@ -152,6 +152,7 @@ class MaicoMqttBridge:
         self._rls_teach_in_active: bool = False
         self._rls_teach_in_result: str | None = None
         self._polling_paused: bool = False
+        self._discovery_enabled: bool = False  # only register unknown senders during explicit pairing
         self._poll_skip_until: float = 0.0  # skip polls until this timestamp (after RLS sync)
         self._availability: dict[str, bool] = {}  # last-published availability per device
         self._availability_task: asyncio.Task | None = None
@@ -269,9 +270,14 @@ class MaicoMqttBridge:
             self._name_to_config[existing.name] = existing
             return existing.name
 
-        # Don't auto-discover when polling is paused (user is doing manual pairing)
-        if self._polling_paused:
-            logger.debug("Auto-discovery skipped (polling paused): %s", device_id_str)
+        # Passive discovery from RF traffic is the root cause of "ghost devices":
+        # corrupt/byte-shifted sender or dest IDs that pass CRC8 but belong to no
+        # real unit accumulate in config and flood the air with polls. We therefore
+        # only register brand-new devices during an explicit pairing window
+        # (set via the Web-UI). In normal operation unknown senders are ignored;
+        # known devices were already resolved above, so this never affects them.
+        if not self._discovery_enabled or self._polling_paused:
+            logger.debug("Auto-discovery skipped (pairing mode off): %s", device_id_str)
             return ""
 
         # New device — auto-register with ID as name
