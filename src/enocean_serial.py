@@ -170,6 +170,10 @@ class EnOceanSerial:
         self._ser: serial.Serial | None = None
         self._base_id: list[int] | None = None
         self._running = False
+        # Serialize writes: send() is called from the asyncio loop (poll loop,
+        # web handlers) and historically from the paho MQTT thread. Two writes
+        # interleaving on the wire would corrupt ESP3 frames on the RF channel.
+        self._write_lock = threading.Lock()
         self._read_thread: threading.Thread | None = None
         self._packet_queue: asyncio.Queue[dict] | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -221,7 +225,8 @@ class EnOceanSerial:
             return
         try:
             packet = build_esp3_packet(data, optional)
-            self._ser.write(packet)
+            with self._write_lock:
+                self._ser.write(packet)
             logger.debug("TX: %s", packet.hex(' '))
         except serial.SerialException:
             logger.exception("Serial write failed")
@@ -232,7 +237,8 @@ class EnOceanSerial:
             return
         try:
             packet = build_esp3_packet(command_data, [], PACKET_TYPE_COMMON_COMMAND)
-            self._ser.write(packet)
+            with self._write_lock:
+                self._ser.write(packet)
         except serial.SerialException:
             logger.exception("Serial command write failed")
 

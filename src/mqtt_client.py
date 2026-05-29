@@ -164,26 +164,28 @@ class MqttClient:
         for device in self.config.devices:
             dt = f"{prefix}/{device.name}"
 
+            # These callbacks run on the paho network thread; marshal the actual
+            # state changes onto the asyncio loop via bridge.dispatch().
             if topic == f"{dt}/set/percentage":
                 try:
                     # HA sends speed_range value (1-5) directly when speed_range_min/max is set
                     level = max(0, min(5, int(float(payload))))
-                    self.bridge.set_level(device.name, level)
+                    self.bridge.dispatch(self.bridge.set_level, device.name, level)
                 except ValueError:
                     logger.error("Invalid percentage: %s", payload)
 
             elif topic == f"{dt}/set/power":
-                self.bridge.set_power(device.name, payload.upper() == "ON")
+                self.bridge.dispatch(self.bridge.set_power, device.name, payload.upper() == "ON")
 
             elif topic == f"{dt}/set/mode":
                 mode = self._i18n["select_map"].get(payload)
                 if mode:
-                    self.bridge.set_mode(device.name, mode)
+                    self.bridge.dispatch(self.bridge.set_mode, device.name, mode)
 
             elif topic == f"{dt}/set/preset_mode":
                 mode = PRESET_TO_MODE.get(payload.lower())
                 if mode:
-                    self.bridge.set_mode(device.name, mode)
+                    self.bridge.dispatch(self.bridge.set_mode, device.name, mode)
 
     def publish_state(self, device_name: str, state: VentilationState) -> None:
         if not self._client or not self._connected:
