@@ -343,10 +343,14 @@ class MaicoMqttBridge:
                 return
 
         if state:
-            # Preserve direction from sync if status doesn't have it
+            # 27 10 status reports do NOT reliably encode the live airflow
+            # direction — verified from traffic, they always report the exhaust
+            # form (0x0X) regardless of the unit's actual reversal phase. Only
+            # 27 00 sync telegrams carry the real, alternating direction, so a
+            # status report must never change it. Devices without a sync partner
+            # therefore stay UNKNOWN (their live direction is not observable).
             existing = self._states.get(name)
-            if existing and state.direction == AirflowDirection.UNKNOWN and existing.direction != AirflowDirection.UNKNOWN:
-                state.direction = existing.direction
+            state.direction = existing.direction if existing else AirflowDirection.UNKNOWN
             self._states[name] = state
             self._state_known.add(name)
             self.mqtt.publish_state(name, state)
