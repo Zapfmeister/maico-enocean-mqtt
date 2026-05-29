@@ -119,12 +119,18 @@ class MqttClient:
         status_topic = f"{cfg.topic_prefix}/bridge/status"
         self._client.will_set(status_topic, "offline", retain=True)
 
+        # Auto-reconnect with capped backoff. Using connect_async + loop_start
+        # means an initially-unreachable broker no longer drops all publishes
+        # forever — the network loop keeps retrying and on_connect re-publishes
+        # discovery once it comes up.
+        self._client.reconnect_delay_set(min_delay=1, max_delay=60)
+
         logger.info("Connecting to MQTT %s:%d", cfg.host, cfg.port)
+        self._client.loop_start()
         try:
-            self._client.connect(cfg.host, cfg.port, keepalive=60)
-            self._client.loop_start()
+            self._client.connect_async(cfg.host, cfg.port, keepalive=60)
         except Exception:
-            logger.exception("MQTT connection failed")
+            logger.exception("MQTT connect_async failed")
 
     def disconnect(self) -> None:
         if self._client:

@@ -190,29 +190,49 @@ class EnOceanSerial:
         return "unknown"
 
     def open(self) -> None:
-        """Open serial port and read base ID."""
+        """Open serial port and read base ID.
+
+        On failure this logs and returns instead of raising: the receive loop
+        keeps retrying, so a stick that is plugged in late or re-plugged still
+        brings the bridge up without a crash/restart.
+        """
+        if not self._open_port():
+            logger.warning(
+                "Serial port %s not ready; will keep retrying in background",
+                self._port,
+            )
+
+    def _open_port(self) -> bool:
+        """(Re)open the serial port and read the base ID. Returns True on success."""
+        self._close_port()
         logger.info("Opening serial port: %s @ %d baud", self._port, self._baudrate)
         try:
             self._ser = serial.Serial(self._port, baudrate=self._baudrate, timeout=0.5)
             self._ser.reset_input_buffer()
-            self._read_base_id()
-        except serial.SerialException:
-            logger.exception("Failed to open serial port %s", self._port)
-            raise
-        except OSError:
-            logger.exception("Serial port %s not accessible", self._port)
-            raise
+        except (serial.SerialException, OSError):
+            logger.warning("Could not open serial port %s", self._port)
+            self._ser = None
+            return False
+        self._read_base_id()
+        # A port that opens but never returns a base ID is useless (all sends
+        # would be silent no-ops) — treat it as not-ready so we retry.
+        return self._base_id is not None
 
-    def close(self) -> None:
-        """Close serial port."""
-        self._running = False
-        # Close serial first to unblock any read() in the thread
+    def _close_port(self) -> None:
+        """Close the underlying serial handle (without stopping the thread)."""
         try:
             if self._ser and self._ser.is_open:
                 self._ser.close()
-                logger.info("Serial port closed")
         except Exception:
             logger.debug("Error closing serial port", exc_info=True)
+        self._ser = None
+
+    def close(self) -> None:
+        """Close serial port and stop the read thread."""
+        self._running = False
+        # Close serial first to unblock any read() in the thread
+        self._close_port()
+        logger.info("Serial port closed")
         if self._read_thread and self._read_thread.is_alive():
             self._read_thread.join(timeout=3)
             if self._read_thread.is_alive():
@@ -242,29 +262,28 @@ class EnOceanSerial:
         except serial.SerialException:
             logger.exception("Serial command write failed")
 
-    def _read_base_id(self) -> None:
-        """Read base ID from stick via CO_RD_IDBASE."""
+    def _read_base_id(self, attempts: int = 3) -> None:
+        """Read base ID from stick via CO_RD_IDBASE, retrying a few times."""
         if not self._ser:
             return
 
-        # Send CO_RD_IDBASE
-        self.send_common_command([CO_RD_IDBASE])
+        for attempt in range(1, attempts + 1):
+            self.send_common_command([CO_RD_IDBASE])
+            time.sleep(0.5)
+            try:
+                if self._ser.in_waiting:
+                    raw = self._ser.read(self._ser.in_waiting)
+                    for pkt in parse_esp3_packets(raw).packets:
+                        if pkt.get('type') == 'response' and len(pkt['data']) >= 5:
+                            if pkt['data'][0] == RETURN_CODE_OK:
+                                self._base_id = list(pkt['data'][1:5])
+                                logger.info("Base ID: %s", self.base_id_str)
+                                return
+            except (serial.SerialException, OSError):
+                logger.warning("Failed to read base ID (attempt %d/%d)", attempt, attempts)
+                return
 
-        # Wait for response
-        time.sleep(0.5)
-        try:
-            if self._ser.in_waiting:
-                raw = self._ser.read(self._ser.in_waiting)
-                for pkt in parse_esp3_packets(raw).packets:
-                    if pkt.get('type') == 'response' and len(pkt['data']) >= 5:
-                        if pkt['data'][0] == RETURN_CODE_OK:
-                            self._base_id = list(pkt['data'][1:5])
-                            logger.info("Base ID: %s", self.base_id_str)
-                            return
-        except serial.SerialException:
-            logger.exception("Failed to read base ID")
-
-        logger.warning("Could not read base ID from stick")
+        logger.warning("Could not read base ID from stick after %d attempts", attempts)
 
     async def start_receive_loop(self) -> None:
         """Start the async receive loop. Call from asyncio context."""
@@ -294,13 +313,30 @@ class EnOceanSerial:
         """Register callback for received packets."""
         self._on_packet = callback
 
+    def _sleep_running(self, seconds: float) -> None:
+        """Sleep in small increments so shutdown stays responsive."""
+        end = time.monotonic() + seconds
+        while self._running and time.monotonic() < end:
+            time.sleep(0.1)
+
     def _serial_read_thread(self) -> None:
-        """Background thread that reads from serial and pushes to async queue."""
+        """Background thread that reads from serial and pushes to async queue.
+
+        Reconnects automatically with a fixed backoff if the stick disappears
+        (a common occurrence on Raspberry Pi USB) so the bridge self-heals.
+        """
         buf = bytearray()
         while self._running:
+            # (Re)connect if the port is not open.
+            if not self._ser or not self._ser.is_open:
+                if not self._open_port():
+                    buf.clear()
+                    self._sleep_running(self.RECONNECT_DELAY)
+                    continue
+                logger.info("Serial port connected")
+                buf.clear()
+
             try:
-                if not self._ser or not self._ser.is_open:
-                    break
                 if self._ser.in_waiting:
                     chunk = self._ser.read(self._ser.in_waiting)
                     buf.extend(chunk)
@@ -325,10 +361,14 @@ class EnOceanSerial:
                             logger.debug("Packet dropped: event loop closed")
                 else:
                     time.sleep(0.02)
-            except serial.SerialException:
+            except (serial.SerialException, OSError):
+                # Stick was unplugged or the port died — drop it and let the
+                # loop above reconnect after the backoff.
                 if self._running:
-                    logger.exception("Serial read error")
-                break
+                    logger.warning("Serial read error, reconnecting in %ds...",
+                                   self.RECONNECT_DELAY)
+                self._close_port()
+                self._sleep_running(self.RECONNECT_DELAY)
             except Exception:
                 logger.exception("Error in serial read thread")
                 time.sleep(0.1)
