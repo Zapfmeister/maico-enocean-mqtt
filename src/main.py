@@ -3,6 +3,9 @@
 Orchestrates EnOcean serial, MAICO MSC protocol, MQTT client, and Web-UI.
 Uses direct MSC 27 20 commands. All devices are treated equally — master/slave
 relationships are detected automatically from 27 00 sync traffic.
+
+Device state model lives in devices.py (DeviceTable, DeviceStatus); sleep/boost
+timers in timers.py (TimerManager).
 """
 
 import asyncio
@@ -10,9 +13,19 @@ import logging
 import signal
 import sys
 import time
-from dataclasses import dataclass, field
 
 from .config import AppConfig, DeviceConfig, load_config
+from .devices import (
+    AVAILABILITY_CHECK_INTERVAL,
+    DEVICE_OFFLINE_TIMEOUT,
+    SYNC_ROLE_TIMEOUT,
+    ConnectionStatus,
+    DeviceStatus,
+    DeviceTable,
+    OPPOSITE_DIR as _OPPOSITE_DIR,
+    SYNC_STATUS_MAP as _SYNC_STATUS_MAP,
+    is_valid_device_id as _is_valid_device_id,
+)
 from .enocean_serial import EnOceanSerial, RORG_MSC
 from .maico_protocol import (
     MscType,
@@ -27,122 +40,9 @@ from .maico_protocol import (
     str_to_id,
 )
 from .mqtt_client import MqttClient
+from .timers import TimerManager
 
 logger = logging.getLogger(__name__)
-
-# Status map for 27 00 sync byte → direction + level
-_SYNC_STATUS_MAP: dict[int, tuple[AirflowDirection, int]] = {
-    0x00: (AirflowDirection.UNKNOWN, 0),
-    # Inflow (Zuluft) — 0x2X
-    0x21: (AirflowDirection.INFLOW, 1),
-    0x22: (AirflowDirection.INFLOW, 2),
-    0x23: (AirflowDirection.INFLOW, 3),
-    0x24: (AirflowDirection.INFLOW, 4),
-    0x25: (AirflowDirection.INFLOW, 5),
-    # Exhaust (Abluft) — 0x0X
-    0x01: (AirflowDirection.EXHAUST, 1),
-    0x02: (AirflowDirection.EXHAUST, 2),
-    0x03: (AirflowDirection.EXHAUST, 3),
-    0x04: (AirflowDirection.EXHAUST, 4),
-    0x05: (AirflowDirection.EXHAUST, 5),
-    # Sleep mode (0x60 seen in sync during sleep)
-    0x60: (AirflowDirection.UNKNOWN, 0),
-}
-
-
-_OPPOSITE_DIR: dict[AirflowDirection, AirflowDirection] = {
-    AirflowDirection.INFLOW: AirflowDirection.EXHAUST,
-    AirflowDirection.EXHAUST: AirflowDirection.INFLOW,
-    AirflowDirection.UNKNOWN: AirflowDirection.UNKNOWN,
-}
-
-
-class ConnectionStatus:
-    MANAGED = "managed"
-    PASSIVE = "passive"
-    UNKNOWN = "unknown"
-
-
-SYNC_ROLE_TIMEOUT = 120  # seconds without sync before role resets
-DEVICE_OFFLINE_TIMEOUT = 300  # seconds without any traffic before HA marks unavailable
-AVAILABILITY_CHECK_INTERVAL = 30  # how often to re-evaluate per-device availability
-
-# IDs that must never be treated as devices
-_INVALID_DEVICE_IDS: set[str] = {
-    "FFFFFFFF",  # EnOcean broadcast address
-    "00000000",  # Null address
-}
-
-
-def _is_valid_device_id(device_id_str: str) -> bool:
-    """Check if an EnOcean device ID looks like a real MAICO device.
-
-    Rejects broadcast addresses, null addresses, and IDs with too many
-    0xFF bytes (typically from RF noise or corrupt serial data).
-    """
-    clean = device_id_str.upper().replace(":", "")
-    if clean in _INVALID_DEVICE_IDS:
-        return False
-    # Count 0xFF bytes — real MAICO IDs never have more than one
-    ff_count = sum(1 for i in range(0, 8, 2) if clean[i:i+2] == "FF")
-    if ff_count >= 2:
-        return False
-    return True
-
-@dataclass
-class DeviceStatus:
-    connection: str = ConnectionStatus.UNKNOWN
-    last_seen: float = 0.0
-    last_response_to_us: float = 0.0
-    response_count: int = 0
-    # Detected relationships from 27 00 sync traffic
-    syncs_to: str | None = None       # Device ID this device sends 27 00 to (= is master of)
-    synced_from: str | None = None     # Device ID that sends 27 00 to us (= our master)
-    last_sync: float = 0.0            # Timestamp of last sync traffic
-
-    @property
-    def last_seen_ago(self) -> int:
-        if self.last_seen == 0:
-            return -1
-        return int(time.time() - self.last_seen)
-
-    @property
-    def detected_role(self) -> str:
-        """Role detected from traffic, not config. Pure read.
-
-        A relationship that hasn't been refreshed within SYNC_ROLE_TIMEOUT no
-        longer counts as active; the underlying fields are cleared separately
-        by expire_stale_role() so that reading the role has no side effects.
-        """
-        if self.last_sync > 0 and (time.time() - self.last_sync) > SYNC_ROLE_TIMEOUT:
-            return "standalone"
-        if self.syncs_to:
-            return "master"
-        if self.synced_from:
-            return "slave"
-        return "standalone"
-
-    def expire_stale_role(self, now: float | None = None) -> None:
-        """Clear master/slave relationship once the sync traffic has gone stale.
-
-        Called periodically (from the availability loop) instead of on every
-        read of detected_role."""
-        if now is None:
-            now = time.time()
-        if self.last_sync > 0 and (now - self.last_sync) > SYNC_ROLE_TIMEOUT:
-            self.syncs_to = None
-            self.synced_from = None
-            self.last_sync = 0.0
-
-    def to_dict(self) -> dict:
-        return {
-            "connection": self.connection,
-            "last_seen_ago": self.last_seen_ago,
-            "response_count": self.response_count,
-            "detected_role": self.detected_role,
-            "syncs_to": self.syncs_to,
-            "synced_from": self.synced_from,
-        }
 
 
 class MaicoMqttBridge:
@@ -152,17 +52,14 @@ class MaicoMqttBridge:
         self.config = config
         self.serial = EnOceanSerial(config.enocean.device)
         self.mqtt = MqttClient(config, self)
-        self._states: dict[str, VentilationState] = {}
-        self._device_status: dict[str, DeviceStatus] = {}
-        self._id_to_name: dict[str, str] = {}
-        self._name_to_config: dict[str, DeviceConfig] = {}
+        self.devices = DeviceTable()
+        self.timers = TimerManager(
+            on_expire=self._restore_mode,
+            on_publish=lambda name, minutes: self.mqtt.publish_timer(name, minutes),
+        )
         self._running = False
         self._poll_task: asyncio.Task | None = None
         self._web_app = None
-        self._state_known: set[str] = set()  # devices with confirmed state from traffic
-        self._saved_states: dict[str, VentilationState] = {}  # saved before sleep/boost
-        self._mode_timers: dict[str, asyncio.Task] = {}  # active mode timers
-        self._timer_end: dict[str, float] = {}  # timestamp when timer expires
         self._last_rls_state: VentilationState | None = None
         self._rls_teach_in_active: bool = False
         self._rls_teach_in_result: str | None = None
@@ -172,12 +69,46 @@ class MaicoMqttBridge:
         self._availability: dict[str, bool] = {}  # last-published availability per device
         self._availability_task: asyncio.Task | None = None
 
+    # --- Backwards-compatible accessors over the extracted state/timer stores.
+    # Handlers, web.py and teach_in.py reference these names directly.
+    @property
+    def _states(self) -> dict[str, VentilationState]:
+        return self.devices.states
+
+    @property
+    def _device_status(self) -> dict[str, DeviceStatus]:
+        return self.devices.status
+
+    @property
+    def _id_to_name(self) -> dict[str, str]:
+        return self.devices.id_to_name
+
+    @property
+    def _name_to_config(self) -> dict[str, DeviceConfig]:
+        return self.devices.name_to_config
+
+    @property
+    def _state_known(self) -> set[str]:
+        return self.devices.state_known
+
+    @property
+    def _saved_states(self) -> dict[str, VentilationState]:
+        return self.timers.saved
+
+    @property
+    def _timer_end(self) -> dict[str, float]:
+        return self.timers.end
+
+    @property
+    def _mode_timers(self) -> dict[str, asyncio.Task]:
+        return self.timers.timers
+
     def dispatch(self, fn, *args) -> None:
         """Run a bridge command on the asyncio loop thread.
 
         MQTT command callbacks fire on the paho network thread. Bridge state
-        (_states, _mode_timers, ...) and serial sends must only be touched from
-        the event loop, so we marshal those callbacks onto it. Falls back to a
+        (_states, timers, ...) and serial sends must only be touched from the
+        event loop, so we marshal those callbacks onto it. Falls back to a
         direct call when no loop is running (e.g. in unit tests).
         """
         loop = getattr(self, "_loop", None)
@@ -196,23 +127,15 @@ class MaicoMqttBridge:
 
     def timer_remaining_minutes(self, device_name: str) -> int:
         """Return remaining timer minutes for a device, or 0 if no timer."""
-        end = self._timer_end.get(device_name)
-        if end is None:
-            return 0
-        remaining = end - time.time()
-        return max(0, int(remaining / 60))
+        return self.timers.remaining_minutes(device_name)
 
     def _setup_device_mappings(self) -> None:
         for device in self.config.devices:
-            dev_id = device.device_id.upper().replace(":", "")
-            self._id_to_name[dev_id] = device.name
-            self._name_to_config[device.name] = device
-            self._states[device.name] = VentilationState()
-            self._device_status[device.name] = DeviceStatus()
+            self.devices.register(device)
 
         if self.config.remote.device_id:
             rls_id = self.config.remote.device_id.upper().replace(":", "")
-            self._id_to_name[rls_id] = self.config.remote.name
+            self.devices.id_to_name[rls_id] = self.config.remote.name
 
     def _handle_packet(self, pkt: dict) -> None:
         if pkt.get('type') != 'radio':
@@ -316,10 +239,7 @@ class MaicoMqttBridge:
         self.config.add_device(device)
         self.config.save()
 
-        self._id_to_name[device_id_str] = name
-        self._name_to_config[name] = device
-        self._states[name] = VentilationState()
-        self._device_status[name] = DeviceStatus()
+        self.devices.register(device)
 
         # Publish HA discovery
         self.mqtt.publish_device_discovery(device)
@@ -668,26 +588,10 @@ class MaicoMqttBridge:
         return True
 
     def _cancel_mode_timer(self, device_name: str) -> None:
-        task = self._mode_timers.pop(device_name, None)
-        if task and not task.done():
-            task.cancel()
-        self._timer_end.pop(device_name, None)
-        self.mqtt.publish_timer(device_name, 0)
+        self.timers.cancel(device_name)
 
     def _start_mode_timer(self, device_name: str, duration: int) -> None:
-        self._timer_end[device_name] = time.time() + duration
-        self.mqtt.publish_timer(device_name, duration // 60)
-
-        async def _timer():
-            logger.info("%s: timer started (%d min)", device_name, duration // 60)
-            await asyncio.sleep(duration)
-            self._timer_end.pop(device_name, None)
-            self._restore_mode(device_name)
-
-        # All commands now run on the event loop thread (MQTT callbacks are
-        # marshalled via dispatch()), so a plain Task is correct here and lets
-        # _cancel_mode_timer() actually cancel a pending sleep.
-        self._mode_timers[device_name] = asyncio.create_task(_timer())
+        self.timers.start(device_name, duration)
 
     def _restore_mode(self, device_name: str) -> None:
         saved = self._saved_states.pop(device_name, None)
@@ -785,7 +689,7 @@ class MaicoMqttBridge:
 
                     # Update timer sensor if active
                     remaining = self.timer_remaining_minutes(device.name)
-                    if device.name in self._timer_end:
+                    if self.timers.has(device.name):
                         self.mqtt.publish_timer(device.name, remaining)
 
                 if i < len(devices) - 1:
