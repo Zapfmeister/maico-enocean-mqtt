@@ -437,7 +437,8 @@ class MqttClient:
         dt = f"{prefix}/{device.name}"
 
         payload = {
-            "name": f"{device.friendly_name or device.name} {self._i18n['options'][1]}",
+            # Bare label; HA prepends the device name (-> "MAICO Bad Sommer").
+            "name": self._i18n['options'][1],
             "unique_id": uid,
             "object_id": uid,
             "state_topic": f"{dt}/summer",
@@ -466,7 +467,8 @@ class MqttClient:
         dt = f"{prefix}/{device.name}"
 
         payload = {
-            "name": f"{device.friendly_name or device.name} {label}",
+            # Bare label; HA prepends the device name (-> "MAICO Bad Schlafen").
+            "name": label,
             "unique_id": uid,
             "object_id": uid,
             "command_topic": f"{dt}/set/{key}",
