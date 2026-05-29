@@ -193,6 +193,19 @@ class MqttClient:
                 if mode:
                     self.bridge.dispatch(self.bridge.set_mode, device.name, mode)
 
+            # HomeKit-friendly mode controls: a Sommer on/off switch (off =
+            # Wärmetauscher) plus momentary Schlafen/Stoßlüften buttons.
+            elif topic == f"{dt}/set/summer":
+                mode = (VentilationMode.SUMMER if payload.upper() == "ON"
+                        else VentilationMode.HEAT_EXCHANGER)
+                self.bridge.dispatch(self.bridge.set_mode, device.name, mode)
+
+            elif topic == f"{dt}/set/sleep":
+                self.bridge.dispatch(self.bridge.set_mode, device.name, VentilationMode.SLEEP_HEAT)
+
+            elif topic == f"{dt}/set/boost":
+                self.bridge.dispatch(self.bridge.set_mode, device.name, VentilationMode.BOOST)
+
     def publish_state(self, device_name: str, state: VentilationState) -> None:
         if not self._client or not self._connected:
             return
@@ -210,6 +223,12 @@ class MqttClient:
         reverse = self._i18n["reverse_map"]
         default_mode = self._i18n["options"][0]
         self._client.publish(f"{t}/mode", reverse.get(state.mode, default_mode), retain=True)
+
+        # HomeKit Sommer switch state (on only while in summer mode)
+        self._client.publish(
+            f"{t}/summer", "ON" if state.mode == VentilationMode.SUMMER else "OFF",
+            retain=True,
+        )
 
         # Full JSON
         self._client.publish(f"{t}/json", json.dumps(state.to_dict()), retain=True)
@@ -270,6 +289,9 @@ class MqttClient:
         """Publish all discovery entities for a single device."""
         self._publish_fan_discovery(device)
         self._publish_mode_select_discovery(device)
+        self._publish_summer_switch_discovery(device)
+        self._publish_mode_button_discovery(device, "sleep", self._i18n["options"][2], "mdi:power-sleep")
+        self._publish_mode_button_discovery(device, "boost", self._i18n["options"][3], "mdi:weather-windy")
         self._publish_direction_sensor_discovery(device)
         self._publish_connection_sensor_discovery(device)
         self._publish_role_sensor_discovery(device)
@@ -286,9 +308,11 @@ class MqttClient:
             return
         ha = self.config.mqtt.ha_discovery_prefix
         uid = f"maico_{device.name.lower()}"
-        for comp, suffix in [("fan", ""), ("select", "_mode"), ("sensor", "_direction"),
-                              ("sensor", "_connection"), ("sensor", "_role"),
-                              ("sensor", "_last_seen"), ("sensor", "_timer")]:
+        for comp, suffix in [("fan", ""), ("select", "_mode"), ("switch", "_summer"),
+                              ("button", "_sleep"), ("button", "_boost"),
+                              ("sensor", "_direction"), ("sensor", "_connection"),
+                              ("sensor", "_role"), ("sensor", "_last_seen"),
+                              ("sensor", "_timer")]:
             self._client.publish(f"{ha}/{comp}/{uid}{suffix}/config", "", retain=True)
 
     def clear_device_topics(self, device_name: str) -> None:
@@ -297,7 +321,7 @@ class MqttClient:
             return
         prefix = self.config.mqtt.topic_prefix
         t = f"{prefix}/{device_name}"
-        for suffix in ["/state", "/percentage", "/direction", "/mode",
+        for suffix in ["/state", "/percentage", "/direction", "/mode", "/summer",
                        "/json", "/connection", "/role", "/last_seen", "/timer",
                        "/availability"]:
             self._client.publish(f"{t}{suffix}", "", retain=True)
@@ -402,6 +426,58 @@ class MqttClient:
             },
         }
         self._client.publish(f"{ha}/select/{uid}/config", json.dumps(payload), retain=True)
+
+    def _publish_summer_switch_discovery(self, device: DeviceConfig) -> None:
+        """Sommer on/off switch (off = Wärmetauscher). HomeKit-/Siri-compatible."""
+        if not self._client:
+            return
+        prefix = self.config.mqtt.topic_prefix
+        ha = self.config.mqtt.ha_discovery_prefix
+        uid = f"maico_{device.name.lower()}_summer"
+        dt = f"{prefix}/{device.name}"
+
+        payload = {
+            "name": f"{device.friendly_name or device.name} {self._i18n['options'][1]}",
+            "unique_id": uid,
+            "object_id": uid,
+            "state_topic": f"{dt}/summer",
+            "command_topic": f"{dt}/set/summer",
+            "payload_on": "ON",
+            "payload_off": "OFF",
+            "icon": "mdi:weather-sunny",
+            **self._availability_block(device.name),
+            "device": {
+                "identifiers": [f"maico_{device.device_id}"],
+            },
+        }
+        self._client.publish(f"{ha}/switch/{uid}/config", json.dumps(payload), retain=True)
+
+    def _publish_mode_button_discovery(self, device: DeviceConfig, key: str,
+                                       label: str, icon: str) -> None:
+        """Momentary button that triggers a ventilation mode (e.g. Schlafen/Stoßlüften).
+
+        HomeKit exposes HA buttons as switches Siri can switch on, so these are
+        directly voice-controllable."""
+        if not self._client:
+            return
+        prefix = self.config.mqtt.topic_prefix
+        ha = self.config.mqtt.ha_discovery_prefix
+        uid = f"maico_{device.name.lower()}_{key}"
+        dt = f"{prefix}/{device.name}"
+
+        payload = {
+            "name": f"{device.friendly_name or device.name} {label}",
+            "unique_id": uid,
+            "object_id": uid,
+            "command_topic": f"{dt}/set/{key}",
+            "payload_press": "PRESS",
+            "icon": icon,
+            **self._availability_block(device.name),
+            "device": {
+                "identifiers": [f"maico_{device.device_id}"],
+            },
+        }
+        self._client.publish(f"{ha}/button/{uid}/config", json.dumps(payload), retain=True)
 
     def _publish_direction_sensor_discovery(self, device: DeviceConfig) -> None:
         if not self._client:
