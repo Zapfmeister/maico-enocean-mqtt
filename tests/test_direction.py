@@ -73,6 +73,13 @@ def test_solo_heat_exchanger_published_as_alternating():
     assert mc._client.pub["maico/x/direction"] == "Wechselnd"
 
 
+def test_summer_published_as_continuous():
+    mc = _mqtt()
+    mc.publish_state("x", VentilationState(mode=VentilationMode.SUMMER,
+                                           fan_level=2, direction=AirflowDirection.UNKNOWN))
+    assert mc._client.pub["maico/x/direction"] == "Durchluft"
+
+
 def test_known_direction_published_as_label():
     mc = _mqtt()
     mc.publish_state("x", VentilationState(mode=VentilationMode.HEAT_EXCHANGER,
