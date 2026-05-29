@@ -9,6 +9,7 @@ detected automatically from EnOcean traffic (27 00 sync telegrams).
 
 import logging
 import os
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -135,13 +136,31 @@ class AppConfig:
             "rls_global_sync": self.rls_global_sync,
         }
 
+        # Write to a temp file in the same directory, then atomically replace.
+        # This is called frequently from event handlers; a crash mid-write must
+        # never leave a truncated/corrupt config.yaml behind.
+        tmp_fd, tmp_name = None, None
         try:
-            with open(path, "w") as f:
+            tmp_fd, tmp_name = tempfile.mkstemp(
+                dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp"
+            )
+            with os.fdopen(tmp_fd, "w") as f:
+                tmp_fd = None  # now owned by the context manager
                 yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_name, path)
+            return True
         except OSError:
             logger.exception("Failed to save config to %s", self.config_path)
+            if tmp_fd is not None:
+                os.close(tmp_fd)
+            if tmp_name and os.path.exists(tmp_name):
+                try:
+                    os.unlink(tmp_name)
+                except OSError:
+                    pass
             return False
-        return True
 
 
 def load_config(path: str | None = None) -> AppConfig:

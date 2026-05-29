@@ -41,6 +41,27 @@ def test_save_reload_round_trip(tmp_path):
     assert reloaded.remote.device_id == "05229657"
 
 
+def test_save_failure_keeps_existing_config(tmp_path, monkeypatch):
+    import src.config as cfgmod
+
+    path = tmp_path / "config.yaml"
+    cfg = AppConfig(config_path=str(path))
+    cfg.mqtt.host = "good-host"
+    assert cfg.save() is True
+    original = path.read_text()
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(cfgmod.yaml, "dump", boom)
+    cfg.mqtt.host = "bad-host"
+    assert cfg.save() is False
+    # The previously saved file must be untouched and no temp file left behind.
+    assert path.read_text() == original
+    leftovers = [p.name for p in tmp_path.iterdir() if p.name != "config.yaml"]
+    assert leftovers == []
+
+
 def test_add_device_deduplicates_by_id(tmp_path):
     cfg = AppConfig(config_path=str(tmp_path / "c.yaml"))
     cfg.add_device(DeviceConfig(name="a", device_id="051EA803"))
