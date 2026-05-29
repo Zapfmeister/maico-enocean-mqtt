@@ -83,3 +83,14 @@ def test_publish_state_emits_summer_off_otherwise():
     mc._connected = True
     mc.publish_state("Bad", VentilationState(mode=VentilationMode.HEAT_EXCHANGER, fan_level=2))
     assert ("maico/Bad/summer", "OFF") in mc._client.pub
+
+
+def test_publish_state_emits_speed_percent():
+    mc, _ = _client()
+    mc._client = Recorder()
+    mc._connected = True
+    # Levels 0-5 map linearly to 0/20/40/60/80/100 %.
+    for level, percent in [(0, 0), (1, 20), (3, 60), (5, 100)]:
+        mc._client = Recorder()
+        mc.publish_state("Bad", VentilationState(mode=VentilationMode.HEAT_EXCHANGER, fan_level=level))
+        assert ("maico/Bad/speed_percent", percent) in mc._client.pub
