@@ -108,16 +108,31 @@ class DeviceStatus:
 
     @property
     def detected_role(self) -> str:
-        """Role detected from traffic, not config. Expires after timeout."""
+        """Role detected from traffic, not config. Pure read.
+
+        A relationship that hasn't been refreshed within SYNC_ROLE_TIMEOUT no
+        longer counts as active; the underlying fields are cleared separately
+        by expire_stale_role() so that reading the role has no side effects.
+        """
         if self.last_sync > 0 and (time.time() - self.last_sync) > SYNC_ROLE_TIMEOUT:
-            self.syncs_to = None
-            self.synced_from = None
-            self.last_sync = 0.0
+            return "standalone"
         if self.syncs_to:
             return "master"
         if self.synced_from:
             return "slave"
         return "standalone"
+
+    def expire_stale_role(self, now: float | None = None) -> None:
+        """Clear master/slave relationship once the sync traffic has gone stale.
+
+        Called periodically (from the availability loop) instead of on every
+        read of detected_role."""
+        if now is None:
+            now = time.time()
+        if self.last_sync > 0 and (now - self.last_sync) > SYNC_ROLE_TIMEOUT:
+            self.syncs_to = None
+            self.synced_from = None
+            self.last_sync = 0.0
 
     def to_dict(self) -> dict:
         return {
@@ -711,9 +726,13 @@ class MaicoMqttBridge:
             logger.info("%s availability → %s", device_name, "online" if online else "offline")
 
     async def _availability_loop(self) -> None:
-        """Periodically re-evaluate device availability and republish changes."""
+        """Periodically expire stale roles, re-evaluate availability, republish."""
         while self._running:
+            now = time.time()
             for device in self.config.devices:
+                ds = self._device_status.get(device.name)
+                if ds:
+                    ds.expire_stale_role(now)
                 self._publish_availability_if_changed(device.name)
             await asyncio.sleep(AVAILABILITY_CHECK_INTERVAL)
 

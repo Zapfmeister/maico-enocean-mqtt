@@ -526,13 +526,3 @@ class MqttClient:
             topic = f"{prefix}/{device.name}/set/#"
             self._client.subscribe(topic)
             logger.info("Subscribed: %s", topic)
-
-    @staticmethod
-    def _level_to_percentage(level: int) -> int:
-        return int(level * 100 / 5)
-
-    @staticmethod
-    def _percentage_to_level(percentage: int) -> int:
-        if percentage <= 0:
-            return 0
-        return max(1, min(5, round(percentage * 5 / 100)))
