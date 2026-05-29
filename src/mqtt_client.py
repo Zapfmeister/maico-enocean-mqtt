@@ -379,7 +379,10 @@ class MqttClient:
         web_url = f"http://{self.config.web.hostname}.local:{self.config.web.port}"
 
         payload = {
-            "name": device.friendly_name or device.name,
+            # Primary entity of the device: name=None makes HA use the device
+            # name verbatim (no doubling). HA prepends the device name to all
+            # other entities, so those carry only their bare role label.
+            "name": None,
             "unique_id": uid,
             "object_id": uid,
             "state_topic": f"{dt}/state",
@@ -394,7 +397,7 @@ class MqttClient:
             **self._availability_block(device.name),
             "device": {
                 "identifiers": [f"maico_{device.device_id}"],
-                "name": f"MAICO {device.friendly_name or device.name}",
+                "name": device.friendly_name or device.name,
                 "manufacturer": "MAICO",
                 "model": "PP 45 RC",
                 "via_device": "maico_bridge",
@@ -413,7 +416,7 @@ class MqttClient:
         dt = f"{prefix}/{device.name}"
 
         payload = {
-            "name": f"{device.friendly_name or device.name} {self._i18n['entity_names']['mode']}",
+            "name": self._i18n['entity_names']['mode'],
             "unique_id": uid,
             "object_id": uid,
             "state_topic": f"{dt}/mode",
@@ -490,7 +493,7 @@ class MqttClient:
         dt = f"{prefix}/{device.name}"
 
         payload = {
-            "name": f"{device.friendly_name or device.name} {self._i18n['entity_names']['direction']}",
+            "name": self._i18n['entity_names']['direction'],
             "unique_id": uid,
             "object_id": uid,
             "state_topic": f"{dt}/direction",
@@ -512,7 +515,7 @@ class MqttClient:
         dt = f"{prefix}/{device.name}"
 
         payload = {
-            "name": f"{device.friendly_name or device.name} {self._i18n['entity_names']['connection']}",
+            "name": self._i18n['entity_names']['connection'],
             "unique_id": uid,
             "object_id": uid,
             "state_topic": f"{dt}/connection",
@@ -538,7 +541,7 @@ class MqttClient:
         dt = f"{prefix}/{device.name}"
 
         payload = {
-            "name": f"{device.friendly_name or device.name} {self._i18n['entity_names']['role']}",
+            "name": self._i18n['entity_names']['role'],
             "unique_id": uid,
             "object_id": uid,
             "state_topic": f"{dt}/role",
@@ -560,7 +563,7 @@ class MqttClient:
         dt = f"{prefix}/{device.name}"
 
         payload = {
-            "name": f"{device.friendly_name or device.name} {self._i18n['entity_names']['last_seen']}",
+            "name": self._i18n['entity_names']['last_seen'],
             "unique_id": uid,
             "object_id": uid,
             "state_topic": f"{dt}/last_seen",
@@ -583,7 +586,7 @@ class MqttClient:
         dt = f"{prefix}/{device.name}"
 
         payload = {
-            "name": f"{device.friendly_name or device.name} Timer",
+            "name": self._i18n['entity_names']['timer'],
             "unique_id": uid,
             "object_id": uid,
             "state_topic": f"{dt}/timer",
