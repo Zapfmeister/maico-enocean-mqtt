@@ -119,12 +119,18 @@ class MqttClient:
         status_topic = f"{cfg.topic_prefix}/bridge/status"
         self._client.will_set(status_topic, "offline", retain=True)
 
+        # Auto-reconnect with capped backoff. Using connect_async + loop_start
+        # means an initially-unreachable broker no longer drops all publishes
+        # forever — the network loop keeps retrying and on_connect re-publishes
+        # discovery once it comes up.
+        self._client.reconnect_delay_set(min_delay=1, max_delay=60)
+
         logger.info("Connecting to MQTT %s:%d", cfg.host, cfg.port)
+        self._client.loop_start()
         try:
-            self._client.connect(cfg.host, cfg.port, keepalive=60)
-            self._client.loop_start()
+            self._client.connect_async(cfg.host, cfg.port, keepalive=60)
         except Exception:
-            logger.exception("MQTT connection failed")
+            logger.exception("MQTT connect_async failed")
 
     def disconnect(self) -> None:
         if self._client:
@@ -164,26 +170,28 @@ class MqttClient:
         for device in self.config.devices:
             dt = f"{prefix}/{device.name}"
 
+            # These callbacks run on the paho network thread; marshal the actual
+            # state changes onto the asyncio loop via bridge.dispatch().
             if topic == f"{dt}/set/percentage":
                 try:
                     # HA sends speed_range value (1-5) directly when speed_range_min/max is set
                     level = max(0, min(5, int(float(payload))))
-                    self.bridge.set_level(device.name, level)
+                    self.bridge.dispatch(self.bridge.set_level, device.name, level)
                 except ValueError:
                     logger.error("Invalid percentage: %s", payload)
 
             elif topic == f"{dt}/set/power":
-                self.bridge.set_power(device.name, payload.upper() == "ON")
+                self.bridge.dispatch(self.bridge.set_power, device.name, payload.upper() == "ON")
 
             elif topic == f"{dt}/set/mode":
                 mode = self._i18n["select_map"].get(payload)
                 if mode:
-                    self.bridge.set_mode(device.name, mode)
+                    self.bridge.dispatch(self.bridge.set_mode, device.name, mode)
 
             elif topic == f"{dt}/set/preset_mode":
                 mode = PRESET_TO_MODE.get(payload.lower())
                 if mode:
-                    self.bridge.set_mode(device.name, mode)
+                    self.bridge.dispatch(self.bridge.set_mode, device.name, mode)
 
     def publish_state(self, device_name: str, state: VentilationState) -> None:
         if not self._client or not self._connected:
@@ -518,13 +526,3 @@ class MqttClient:
             topic = f"{prefix}/{device.name}/set/#"
             self._client.subscribe(topic)
             logger.info("Subscribed: %s", topic)
-
-    @staticmethod
-    def _level_to_percentage(level: int) -> int:
-        return int(level * 100 / 5)
-
-    @staticmethod
-    def _percentage_to_level(percentage: int) -> int:
-        if percentage <= 0:
-            return 0
-        return max(1, min(5, round(percentage * 5 / 100)))

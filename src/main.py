@@ -108,16 +108,31 @@ class DeviceStatus:
 
     @property
     def detected_role(self) -> str:
-        """Role detected from traffic, not config. Expires after timeout."""
+        """Role detected from traffic, not config. Pure read.
+
+        A relationship that hasn't been refreshed within SYNC_ROLE_TIMEOUT no
+        longer counts as active; the underlying fields are cleared separately
+        by expire_stale_role() so that reading the role has no side effects.
+        """
         if self.last_sync > 0 and (time.time() - self.last_sync) > SYNC_ROLE_TIMEOUT:
-            self.syncs_to = None
-            self.synced_from = None
-            self.last_sync = 0.0
+            return "standalone"
         if self.syncs_to:
             return "master"
         if self.synced_from:
             return "slave"
         return "standalone"
+
+    def expire_stale_role(self, now: float | None = None) -> None:
+        """Clear master/slave relationship once the sync traffic has gone stale.
+
+        Called periodically (from the availability loop) instead of on every
+        read of detected_role."""
+        if now is None:
+            now = time.time()
+        if self.last_sync > 0 and (now - self.last_sync) > SYNC_ROLE_TIMEOUT:
+            self.syncs_to = None
+            self.synced_from = None
+            self.last_sync = 0.0
 
     def to_dict(self) -> dict:
         return {
@@ -156,6 +171,20 @@ class MaicoMqttBridge:
         self._poll_skip_until: float = 0.0  # skip polls until this timestamp (after RLS sync)
         self._availability: dict[str, bool] = {}  # last-published availability per device
         self._availability_task: asyncio.Task | None = None
+
+    def dispatch(self, fn, *args) -> None:
+        """Run a bridge command on the asyncio loop thread.
+
+        MQTT command callbacks fire on the paho network thread. Bridge state
+        (_states, _mode_timers, ...) and serial sends must only be touched from
+        the event loop, so we marshal those callbacks onto it. Falls back to a
+        direct call when no loop is running (e.g. in unit tests).
+        """
+        loop = getattr(self, "_loop", None)
+        if loop and loop.is_running():
+            loop.call_soon_threadsafe(fn, *args)
+        else:
+            fn(*args)
 
     @property
     def states(self) -> dict[str, VentilationState]:
@@ -651,13 +680,10 @@ class MaicoMqttBridge:
             self._timer_end.pop(device_name, None)
             self._restore_mode(device_name)
 
-        loop = getattr(self, '_loop', None)
-        if loop and loop.is_running():
-            future = asyncio.run_coroutine_threadsafe(_timer(), loop)
-            # Wrap in a simple object that has .done() and .cancel()
-            self._mode_timers[device_name] = future
-        else:
-            self._mode_timers[device_name] = asyncio.create_task(_timer())
+        # All commands now run on the event loop thread (MQTT callbacks are
+        # marshalled via dispatch()), so a plain Task is correct here and lets
+        # _cancel_mode_timer() actually cancel a pending sleep.
+        self._mode_timers[device_name] = asyncio.create_task(_timer())
 
     def _restore_mode(self, device_name: str) -> None:
         saved = self._saved_states.pop(device_name, None)
@@ -700,9 +726,13 @@ class MaicoMqttBridge:
             logger.info("%s availability → %s", device_name, "online" if online else "offline")
 
     async def _availability_loop(self) -> None:
-        """Periodically re-evaluate device availability and republish changes."""
+        """Periodically expire stale roles, re-evaluate availability, republish."""
         while self._running:
+            now = time.time()
             for device in self.config.devices:
+                ds = self._device_status.get(device.name)
+                if ds:
+                    ds.expire_stale_role(now)
                 self._publish_availability_if_changed(device.name)
             await asyncio.sleep(AVAILABILITY_CHECK_INTERVAL)
 

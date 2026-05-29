@@ -1,0 +1,13 @@
+stages:
+  - test
+
+pytest:
+  stage: test
+  image: python:3.13-slim
+  before_script:
+    - pip install --no-cache-dir -r requirements-dev.txt
+  script:
+    - python -m pytest
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
