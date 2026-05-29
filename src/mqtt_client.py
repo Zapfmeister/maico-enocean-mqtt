@@ -53,7 +53,7 @@ _MODE_I18N = {
             VentilationMode.SLEEP_SUMMER: "Schlafen",
             VentilationMode.BOOST: "Stoßlüften",
         },
-        "direction": {"inflow": "Zuluft", "exhaust": "Abluft", "unknown": "Unbekannt", "off": "Aus", "alternating": "Wechselnd"},
+        "direction": {"inflow": "Zuluft", "exhaust": "Abluft", "unknown": "Unbekannt", "off": "Aus", "alternating": "Wechselnd", "continuous": "Durchluft"},
         "entity_names": {
             "mode": "Modus",
             "direction": "Luftrichtung",
@@ -80,7 +80,7 @@ _MODE_I18N = {
             VentilationMode.SLEEP_SUMMER: "Sleep",
             VentilationMode.BOOST: "Boost",
         },
-        "direction": {"inflow": "Inflow", "exhaust": "Exhaust", "unknown": "Unknown", "off": "Off", "alternating": "Alternating"},
+        "direction": {"inflow": "Inflow", "exhaust": "Exhaust", "unknown": "Unknown", "off": "Off", "alternating": "Alternating", "continuous": "Continuous"},
         "entity_names": {
             "mode": "Mode",
             "direction": "Airflow Direction",
@@ -232,6 +232,12 @@ class MqttClient:
             # phase (only master/slave pairs do, via 27 00 sync). So instead of
             # a misleading fixed value, show that the airflow alternates.
             direction = dir_labels["alternating"]
+        elif state.mode in (VentilationMode.SUMMER, VentilationMode.SLEEP_SUMMER):
+            # Summer mode bypasses heat recovery and runs continuously in one
+            # direction ("Durchluft") — it doesn't alternate, and the status
+            # telegram carries no direction byte. So show the continuous-flow
+            # label instead of a meaningless "unknown".
+            direction = dir_labels["continuous"]
         else:
             direction = dir_labels["unknown"]
         self._client.publish(f"{t}/direction", direction, retain=True)
