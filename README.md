@@ -37,6 +37,21 @@ This project reverse-engineers the MAICO MSC protocol (EnOcean RORG 0xD1, functi
 
 Best when the USB stick is on a different machine than Home Assistant.
 
+A multi-arch image (amd64 / arm64 / armv7) is published automatically to the
+GitHub Container Registry on every release, so you can run it without building:
+
+```bash
+# Grab the example files, configure, and start the published image
+curl -O https://raw.githubusercontent.com/zapfmeister/maico-enocean-mqtt/main/docker-compose.example.yml
+curl -O https://raw.githubusercontent.com/zapfmeister/maico-enocean-mqtt/main/.env.example
+mv .env.example .env   # then edit .env (see step 3) and the device path (step 4)
+docker compose -f docker-compose.example.yml up -d
+```
+
+Image: `ghcr.io/zapfmeister/maico-enocean-mqtt:latest` (or pin a version, e.g. `:0.2.0`).
+
+To build from source instead, follow the steps below.
+
 ### 1. Clone the repository
 
 ```bash
