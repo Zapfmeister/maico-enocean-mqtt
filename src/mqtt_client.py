@@ -11,6 +11,8 @@ Publishes per device:
 
 import json
 import logging
+import time
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from . import __version__ as sw_version
@@ -94,6 +96,51 @@ _MODE_I18N = {
 }
 
 
+@dataclass
+class ConnectionHealth:
+    """In-memory MQTT connection stability metrics, since process start.
+
+    The bridge process stays up across brief broker/network drops, so it can
+    count its own reconnects first-hand — a cheap, generic health signal that
+    surfaces a flapping link (e.g. Wi-Fi power-save) without any external probe.
+    All timestamps are wall-clock ``time.time()``; ``now`` is injectable for
+    deterministic tests.
+    """
+
+    connected: bool = False
+    connect_count: int = 0          # successful (re)connects observed
+    disconnect_count: int = 0       # unexpected disconnects observed
+    last_connect_at: float = 0.0
+    last_disconnect_at: float = 0.0
+    started_at: float = field(default_factory=time.time)
+
+    def record_connect(self, now: float | None = None) -> None:
+        self.connected = True
+        self.connect_count += 1
+        self.last_connect_at = time.time() if now is None else now
+
+    def record_disconnect(self, now: float | None = None) -> None:
+        self.connected = False
+        self.disconnect_count += 1
+        self.last_disconnect_at = time.time() if now is None else now
+
+    @property
+    def reconnect_count(self) -> int:
+        """Connects beyond the first — i.e. how often the link came back."""
+        return max(0, self.connect_count - 1)
+
+    def to_dict(self, now: float | None = None) -> dict:
+        now = time.time() if now is None else now
+        return {
+            "connected": self.connected,
+            "reconnect_count": self.reconnect_count,
+            "disconnect_count": self.disconnect_count,
+            "connected_for": int(now - self.last_connect_at) if self.last_connect_at else -1,
+            "last_disconnect_ago": int(now - self.last_disconnect_at) if self.last_disconnect_at else -1,
+            "uptime": int(now - self.started_at),
+        }
+
+
 class MqttClient:
     """MQTT client for Home Assistant integration via MQTT Discovery."""
 
@@ -102,6 +149,7 @@ class MqttClient:
         self.bridge = bridge
         self._client: mqtt.Client | None = None
         self._connected = False
+        self.health = ConnectionHealth()
         self._i18n = _MODE_I18N.get(config.language, _MODE_I18N["de"])
 
     def connect(self) -> None:
@@ -148,6 +196,7 @@ class MqttClient:
         if rc == 0:
             logger.info("MQTT connected")
             self._connected = True
+            self.health.record_connect()
             self._publish_availability("online")
             self._publish_all_discovery()
             self._subscribe_commands()
@@ -158,6 +207,7 @@ class MqttClient:
                        rc: mqtt.ReasonCode, properties: mqtt.Properties | None = None) -> None:
         logger.warning("MQTT disconnected (rc=%s)", rc)
         self._connected = False
+        self.health.record_disconnect()
 
     def _on_message(self, client: mqtt.Client, userdata: object, msg: mqtt.MQTTMessage) -> None:
         topic = msg.topic

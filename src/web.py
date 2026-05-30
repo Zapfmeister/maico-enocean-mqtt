@@ -109,6 +109,12 @@ TRANSLATIONS = {
         "rls_not_connected": "Nicht verbunden",
         "rls_last_level": "Aktuelle Stufe",
         "rls_global_sync": "RLS steuert alle Geräte",
+        "mqtt_status": "MQTT-Verbindung",
+        "mqtt_connected": "Verbunden",
+        "mqtt_disconnected": "Getrennt",
+        "mqtt_connected_since": "Verbunden seit",
+        "mqtt_reconnects": "Reconnects (seit Start)",
+        "mqtt_last_drop": "Letzter Abriss vor",
         "rls_pair_title": "RLS 45 K Fernbedienung anlernen",
         "rls_pair_desc": "Damit die Bridge Befehle der Wandfernbedienung empfängt, muss die RLS mit der Bridge gepairt werden. Die Bridge gibt sich dabei als PP 45 Gerät aus.",
         "rls_pair_btn": "RLS anlernen",
@@ -236,6 +242,12 @@ TRANSLATIONS = {
         "rls_not_connected": "Not connected",
         "rls_last_level": "Current level",
         "rls_global_sync": "RLS controls all devices",
+        "mqtt_status": "MQTT Connection",
+        "mqtt_connected": "Connected",
+        "mqtt_disconnected": "Disconnected",
+        "mqtt_connected_since": "Connected for",
+        "mqtt_reconnects": "Reconnects (since start)",
+        "mqtt_last_drop": "Last drop",
         "rls_pair_title": "RLS 45 K Remote Control",
         "rls_pair_desc": "Pair the wall remote with the bridge so it can receive RLS commands. The bridge pretends to be a PP 45 device.",
         "rls_pair_btn": "Pair RLS",
@@ -420,6 +432,15 @@ def create_web_app(bridge: "MaicoMqttBridge") -> FastAPI:
                 "sync_enabled": bridge.config.rls_global_sync,
             }
 
+        mh = bridge.mqtt.health.to_dict()
+        mqtt_info = {
+            "connected": mh["connected"],
+            "reconnects": mh["reconnect_count"],
+            "connected_for": _fmt_duration(mh["connected_for"]),
+            "last_drop": _fmt_duration(mh["last_disconnect_ago"]),
+            "has_dropped": mh["last_disconnect_ago"] >= 0,
+        }
+
         return templates.TemplateResponse(request, "dashboard.html", {
             "pairs": pairs,
             "standalone": standalone,
@@ -429,6 +450,7 @@ def create_web_app(bridge: "MaicoMqttBridge") -> FastAPI:
             "mode_labels": t["mode_labels"],
             "direction_labels": t["direction_labels"],
             "rls": rls_info,
+            "mqtt": mqtt_info,
         })
 
     # --- Pairing ---
@@ -782,6 +804,7 @@ def create_web_app(bridge: "MaicoMqttBridge") -> FastAPI:
             "base_id": bridge.serial.base_id_str if bridge.serial else None,
             "device_count": len(bridge.config.devices),
             "poll_interval": bridge.config.poll_interval,
+            "mqtt": bridge.mqtt.health.to_dict(),
         })
 
     @app.get("/healthz")
@@ -830,6 +853,22 @@ def register_mdns(hostname: str, port: int) -> None:
         logger.debug("zeroconf not installed, mDNS disabled")
     except Exception:
         logger.debug("mDNS registration failed", exc_info=True)
+
+
+def _fmt_duration(seconds: int) -> str:
+    """Compact, locale-neutral duration: '34s', '5m', '2h 4m', '1d 3h', '—'."""
+    if seconds < 0:
+        return "—"
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, _ = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m"
+    hours, minutes = divmod(minutes, 60)
+    if hours < 24:
+        return f"{hours}h {minutes}m" if minutes else f"{hours}h"
+    days, hours = divmod(hours, 24)
+    return f"{days}d {hours}h" if hours else f"{days}d"
 
 
 def _get_local_ip() -> str:
