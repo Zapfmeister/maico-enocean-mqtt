@@ -4,13 +4,13 @@
 #   2. adjust the EnOcean device path below (see README step 2)
 #   3. docker compose -f docker-compose.example.yml up -d
 #
-# Pin a version instead of :latest for reproducible deployments, e.g. :0.2.0
+# The image tag is pinned to this project's released version (kept in sync with
+# src/__init__.py by a test) for reproducible deployments. Bump both together.
 services:
   maico-bridge:
-    image: ghcr.io/zapfmeister/maico-enocean-mqtt:latest
+    image: ghcr.io/zapfmeister/maico-enocean-mqtt:0.2.0
     container_name: maico-enocean-bridge
     restart: unless-stopped
-    pull_policy: always
     ports:
       - "8080:8080"
     devices:
