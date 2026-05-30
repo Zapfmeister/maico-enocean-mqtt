@@ -22,6 +22,8 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 import uvicorn
 
+from . import __version__
+
 if TYPE_CHECKING:
     from .main import MaicoMqttBridge
 
@@ -339,6 +341,7 @@ async def _parse_json(request: Request) -> dict | None:
 def create_web_app(bridge: "MaicoMqttBridge") -> FastAPI:
     app = FastAPI(title="MAICO Controller", docs_url=None, redoc_url=None)
     templates = Jinja2Templates(directory="templates")
+    templates.env.globals["version"] = __version__  # shown in the footer
     default_lang = bridge.config.language
 
     # Session store: token -> expiry timestamp
