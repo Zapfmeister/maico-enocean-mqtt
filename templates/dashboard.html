@@ -112,6 +112,22 @@
 
 </div>
 
+<div class="card" style="margin-top: 16px; border-left: 3px solid {% if mqtt.connected %}#27ae60{% else %}#c0392b{% endif %};">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+        <h2 style="margin: 0;">{{ t.mqtt_status }}</h2>
+        <span class="status-badge {{ 'status-on' if mqtt.connected else 'status-off' }}">
+            {{ t.mqtt_connected if mqtt.connected else t.mqtt_disconnected }}
+        </span>
+    </div>
+    <div class="device-info">
+        <div class="info-row"><span class="info-label">{{ t.mqtt_connected_since }}:</span> {{ mqtt.connected_for }}</div>
+        <div class="info-row"><span class="info-label">{{ t.mqtt_reconnects }}:</span> {{ mqtt.reconnects }}</div>
+        {% if mqtt.has_dropped %}
+        <div class="info-row"><span class="info-label">{{ t.mqtt_last_drop }}:</span> {{ mqtt.last_drop }}</div>
+        {% endif %}
+    </div>
+</div>
+
 {% if rls %}
 <div class="card" style="margin-top: 16px; border-left: 3px solid #e67e22;">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
