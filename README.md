@@ -184,7 +184,12 @@ The MAICO MSC protocol is documented in detail in [`MAICO_ENOCEAN_PROTOCOL.md`](
 
 ## License
 
-MIT
+[PolyForm Noncommercial License 1.0.0](LICENSE) — free for noncommercial use
+(private/home, hobby, research, education). **Commercial use requires a
+separate license** — see [COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md).
+
+> Note: releases up to and including the last MIT-licensed commit remain
+> available under the MIT License; this change applies going forward.
 
 ## Credits
 
