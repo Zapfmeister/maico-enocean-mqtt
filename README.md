@@ -48,9 +48,10 @@ mv .env.example .env   # then edit .env (see step 3) and the device path (step 4
 docker compose -f docker-compose.example.yml up -d
 ```
 
-Image: `ghcr.io/zapfmeister/maico-enocean-mqtt:latest` (or pin a version, e.g. `:0.2.0`).
+Image: `ghcr.io/zapfmeister/maico-enocean-mqtt:latest` (or pin a version, e.g. `:0.2.1`).
 
-To build from source instead, follow the steps below.
+To keep everything in a cloned checkout (config tracked in the repo), follow the
+steps below — the bundled `docker-compose.yml` also runs the published image.
 
 ### 1. Clone the repository
 
@@ -101,6 +102,27 @@ docker compose up -d
 ### 6. Open the Web UI
 
 Navigate to `http://<your-host-ip>:8080` or `http://maico-controller.local:8080` (mDNS).
+
+### Updating
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+### Development (build from source)
+
+To run your local changes instead of the released image, layer the dev override
+(it swaps `image:` for `build: .`):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+```
+
+To cut a release, bump the version everywhere in one step and push:
+
+```bash
+python scripts/bump-version.py 0.2.2   # updates __init__.py, config.json, both composes
+```
 
 ## Setup Option 2: Home Assistant Add-on
 
