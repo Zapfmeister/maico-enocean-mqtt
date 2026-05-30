@@ -184,6 +184,8 @@ The system language (configurable in Settings) also affects entity names in Home
 | `MAICO_WEB_PORT` | `8080` | Web UI port |
 | `MAICO_WEB_PASSWORD` | | Web UI password (empty = no auth) |
 | `MAICO_HOSTNAME` | `maico-controller` | mDNS hostname |
+| `MAICO_MQTT_CLIENT_ID` | | MQTT client id (empty = unique id generated per process) |
+| `MAICO_MDNS` | `false` | Advertise the Web UI via in-container mDNS (only useful with host networking) |
 | `MAICO_LANGUAGE` | `de` | System language (`de` or `en`) |
 
 Environment variables take precedence over `config.yaml`.

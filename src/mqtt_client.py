@@ -11,6 +11,7 @@ Publishes per device:
 
 import json
 import logging
+import secrets
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -156,9 +157,13 @@ class MqttClient:
 
     def connect(self) -> None:
         cfg = self.config.mqtt
+        # A unique client_id avoids two instances kicking each other off the
+        # broker (which looks like periodic disconnects). Stable within a
+        # process so reconnects reuse the same session; override via config.
+        client_id = cfg.client_id or f"maico-enocean-bridge-{secrets.token_hex(3)}"
         self._client = mqtt.Client(
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
-            client_id="maico-enocean-bridge",
+            client_id=client_id,
         )
 
         if cfg.username:
