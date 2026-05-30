@@ -171,6 +171,21 @@ class MaicoMqttBridge:
         dev = self._name_to_config.get(device_name)
         return (dev.friendly_name or device_name) if dev else device_name
 
+    def _resolve_to_master(self, device_name: str) -> str:
+        """Map a slave device to its master.
+
+        A slave physically mirrors its master's fan level (opposite airflow,
+        enforced by the 27 00 sync), so it cannot be driven independently — any
+        command must target the master. Returns the master's name for an active
+        slave, otherwise the name unchanged. If the sync has gone stale the role
+        decays to "standalone" and the device is controllable directly again."""
+        ds = self._device_status.get(device_name)
+        if ds and ds.detected_role == "slave" and ds.synced_from:
+            master = self._id_to_name.get(ds.synced_from)
+            if master and master != device_name:
+                return master
+        return device_name
+
     def record_event(self, category: str, key: str, *, device: str | None = None,
                      source: str | None = None, **kw) -> None:
         """Append a localised entry to the in-memory event log."""
@@ -565,6 +580,7 @@ class MaicoMqttBridge:
         self.record_event("pairing", "rls_paired", source="rls", id=sender_str)
 
     def set_level(self, device_name: str, level: int, source: str = "system") -> bool:
+        device_name = self._resolve_to_master(device_name)
         device = self._name_to_config.get(device_name)
         if not device or not self.serial.base_id:
             logger.error("Cannot set level: device=%s base_id=%s", device_name, self.serial.base_id)
@@ -625,6 +641,7 @@ class MaicoMqttBridge:
 
     def set_mode(self, device_name: str, mode: VentilationMode, source: str = "system") -> bool:
         """Switch operating mode and send to device. Starts timer for sleep/boost."""
+        device_name = self._resolve_to_master(device_name)
         device = self._name_to_config.get(device_name)
         if not device or not self.serial.base_id:
             return False
