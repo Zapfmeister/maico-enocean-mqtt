@@ -77,6 +77,7 @@ class DeviceStatus:
     last_seen: float = 0.0
     last_response_to_us: float = 0.0
     response_count: int = 0
+    rssi: int | None = None           # last receive signal strength in dBm
     # Detected relationships from 27 00 sync traffic
     syncs_to: str | None = None       # Device ID this device sends 27 00 to (= is master of)
     synced_from: str | None = None    # Device ID that sends 27 00 to us (= our master)
@@ -124,6 +125,7 @@ class DeviceStatus:
             "detected_role": self.detected_role,
             "syncs_to": self.syncs_to,
             "synced_from": self.synced_from,
+            "rssi": self.rssi,
         }
 
 

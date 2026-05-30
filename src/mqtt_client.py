@@ -62,6 +62,7 @@ _MODE_I18N = {
             "connection": "Verbindung",
             "role": "Rolle",
             "last_seen": "Letzter Kontakt",
+            "signal": "Funksignal",
             "timer": "Timer",
             "speed": "Drehzahl",
         },
@@ -89,6 +90,7 @@ _MODE_I18N = {
             "connection": "Connection",
             "role": "Role",
             "last_seen": "Last Seen",
+            "signal": "Signal Strength",
             "timer": "Timer",
             "speed": "Fan Speed",
         },
@@ -320,6 +322,7 @@ class MqttClient:
         self._client.publish(f"{t}/role", status.detected_role, retain=True)
         last_seen = status.last_seen_ago
         self._client.publish(f"{t}/last_seen", last_seen if last_seen >= 0 else "unknown", retain=True)
+        self._client.publish(f"{t}/rssi", status.rssi if status.rssi is not None else "unknown", retain=True)
 
     def publish_device_availability(self, device_name: str, online: bool) -> None:
         """Publish per-device availability (online/offline) for HA entity state."""
@@ -374,6 +377,7 @@ class MqttClient:
         self._publish_connection_sensor_discovery(device)
         self._publish_role_sensor_discovery(device)
         self._publish_last_seen_sensor_discovery(device)
+        self._publish_rssi_sensor_discovery(device)
         self._publish_timer_sensor_discovery(device)
 
     def publish_device_discovery(self, device: DeviceConfig) -> None:
@@ -391,7 +395,7 @@ class MqttClient:
                               ("button", "_sleep"), ("button", "_boost"),
                               ("sensor", "_direction"), ("sensor", "_connection"),
                               ("sensor", "_role"), ("sensor", "_last_seen"),
-                              ("sensor", "_timer")]:
+                              ("sensor", "_rssi"), ("sensor", "_timer")]:
             self._client.publish(f"{ha}/{comp}/{uid}{suffix}/config", "", retain=True)
 
     def clear_device_topics(self, device_name: str) -> None:
@@ -402,7 +406,7 @@ class MqttClient:
         t = f"{prefix}/{device_name}"
         for suffix in ["/state", "/percentage", "/speed_percent", "/direction",
                        "/mode", "/summer",
-                       "/json", "/connection", "/role", "/last_seen", "/timer",
+                       "/json", "/connection", "/role", "/last_seen", "/rssi", "/timer",
                        "/availability"]:
             self._client.publish(f"{t}{suffix}", "", retain=True)
 
@@ -673,6 +677,30 @@ class MqttClient:
             "state_topic": f"{dt}/last_seen",
             "unit_of_measurement": "s",
             "icon": "mdi:clock-outline",
+            "entity_category": "diagnostic",
+            "availability_topic": f"{prefix}/bridge/status",
+            "device": {
+                "identifiers": [f"maico_{device.device_id}"],
+            },
+        }
+        self._client.publish(f"{ha}/sensor/{uid}/config", json.dumps(payload), retain=True)
+
+    def _publish_rssi_sensor_discovery(self, device: DeviceConfig) -> None:
+        if not self._client:
+            return
+        prefix = self.config.mqtt.topic_prefix
+        ha = self.config.mqtt.ha_discovery_prefix
+        uid = f"maico_{device.name.lower()}_rssi"
+        dt = f"{prefix}/{device.name}"
+
+        payload = {
+            "name": self._i18n['entity_names']['signal'],
+            "unique_id": uid,
+            "object_id": uid,
+            "state_topic": f"{dt}/rssi",
+            "device_class": "signal_strength",
+            "unit_of_measurement": "dBm",
+            "state_class": "measurement",
             "entity_category": "diagnostic",
             "availability_topic": f"{prefix}/bridge/status",
             "device": {

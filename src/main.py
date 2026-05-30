@@ -223,6 +223,15 @@ class MaicoMqttBridge:
             logger.debug("Ignoring packet from invalid sender: %s", sender_str)
             return
 
+        # Record receive signal strength for any telegram from a known device.
+        # (New senders are resolved later in the handlers; their RSSI lands on
+        # the next packet, which is fine for a slowly-changing link metric.)
+        rssi = pkt.get('rssi')
+        if rssi is not None:
+            name = self._id_to_name.get(sender_str)
+            if name:
+                self._device_status.setdefault(name, DeviceStatus()).rssi = rssi
+
         if rorg == RORG_MSC:
             telegram = parse_msc_telegram(user_data, sender, dest)
             if not telegram:
@@ -730,6 +739,10 @@ class MaicoMqttBridge:
                 ds = self._device_status.get(device.name)
                 if ds:
                     ds.expire_stale_role(now)
+                    # Republish connection status so last_seen / RSSI stay live in
+                    # HA — they were previously only sent on a status *change*,
+                    # which left "last seen" frozen at its first value.
+                    self.mqtt.publish_connection_status(device.name, ds)
                 self._publish_availability_if_changed(device.name)
             await asyncio.sleep(AVAILABILITY_CHECK_INTERVAL)
 

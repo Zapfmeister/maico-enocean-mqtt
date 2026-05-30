@@ -138,6 +138,10 @@ def parse_esp3_packets(raw: bytes) -> ParseResult:
             status = pkt_data[-1]
             user_data = pkt_data[1:-5]
             dest = pkt_opt[1:5] if opt_len >= 5 else None
+            # ERP1 optional data: [SubTelNum, dest(4), dBm, SecurityLevel].
+            # The dBm byte is the receive signal strength as a positive
+            # magnitude, so the actual RSSI is its negation (e.g. 0x5A → -90).
+            rssi = -pkt_opt[5] if opt_len >= 6 else None
             result.packets.append({
                 'type': 'radio',
                 'rorg': rorg,
@@ -145,6 +149,7 @@ def parse_esp3_packets(raw: bytes) -> ParseResult:
                 'status': status,
                 'user_data': user_data,
                 'dest': dest,
+                'rssi': rssi,
             })
         elif pkt_type == PACKET_TYPE_RESPONSE:
             result.packets.append({
