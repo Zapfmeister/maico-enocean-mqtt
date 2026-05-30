@@ -17,6 +17,15 @@
 </div>
 {% endmacro %}
 
+{# Red→green signal bar. Maps RSSI (dBm) to a 0–100 % quality: -100 → 0 %,
+   -75 → 50 %, -50 → 100 %. The exact dBm stays available on hover. #}
+{% macro signal_bar(rssi) %}
+{% set q = [[(rssi + 100) * 2, 0]|max, 100]|min %}
+<span class="signal-bar" title="{{ rssi }} dBm">
+    <span class="signal-fill" style="width: {{ q }}%; background: hsl({{ (q * 1.2)|int }}, 70%, 45%);"></span>
+</span>
+{% endmacro %}
+
 {% macro device_state(dev) %}
 {% if dev.state %}
 <div class="device-info">
@@ -26,7 +35,7 @@
     <div class="info-row"><span class="info-label">{{ t.airflow }}:</span> {{ direction_labels.get(dev.state.direction, dev.state.direction) }}</div>
     {% endif %}
     {% if dev.connection and dev.connection.rssi is not none %}
-    <div class="info-row"><span class="info-label">{{ t.signal }}:</span> {{ dev.connection.rssi }} dBm</div>
+    <div class="info-row"><span class="info-label">{{ t.signal }}:</span> {{ signal_bar(dev.connection.rssi) }}</div>
     {% endif %}
 </div>
 {% endif %}
@@ -177,6 +186,21 @@
         color: #666;
         min-width: 70px;
         display: inline-block;
+    }
+    .signal-bar {
+        display: inline-block;
+        width: 90px;
+        height: 9px;
+        border-radius: 5px;
+        background: #e6e6e6;
+        overflow: hidden;
+        vertical-align: middle;
+    }
+    .signal-fill {
+        display: block;
+        height: 100%;
+        border-radius: 5px;
+        transition: width 0.3s, background 0.3s;
     }
     .controls-section {
         margin-top: 10px;
