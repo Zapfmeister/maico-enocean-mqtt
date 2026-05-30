@@ -3,39 +3,40 @@
 
 {% block content %}
 <h1 style="margin-bottom: 4px;">{{ t.logs_title }}</h1>
-<p class="meta" style="margin-bottom: 16px;">{{ t.logs_hint }}</p>
+<p class="meta" style="margin-bottom: 12px;">{{ t.logs_hint }}</p>
 
-<div class="card">
-{% if events %}
-<table>
-    <thead>
-        <tr>
-            <th style="width: 70px;">{{ t.logs_time }}</th>
-            <th>{{ t.logs_event }}</th>
-            <th style="width: 130px;">{{ t.logs_source }}</th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for e in events %}
-        <tr>
-            <td class="meta" title="{{ e.ago }}s">{{ e.ago_str }}</td>
-            <td>
-                <span class="cat-badge cat-{{ e.category }}">{{ t.category_labels.get(e.category, e.category) }}</span>
-                {{ e.message }}
-            </td>
-            <td>{% if e.source %}<span class="src-badge">{{ t.source_labels.get(e.source, e.source) }}</span>{% endif %}</td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
-{% else %}
-<p>{{ t.logs_empty }}</p>
-{% endif %}
+<div class="log-filters">
+    <button class="log-filter active" data-cat="all">{{ t.logs_all }}</button>
+    <button class="log-filter" data-cat="control">{{ t.category_labels.control }}</button>
+    <button class="log-filter" data-cat="connection">{{ t.category_labels.connection }}</button>
+    <button class="log-filter" data-cat="pairing">{{ t.category_labels.pairing }}</button>
+    <button class="log-filter" data-cat="mqtt">{{ t.category_labels.mqtt }}</button>
+    <button class="log-filter" data-cat="system">{{ t.category_labels.system }}</button>
+</div>
+
+<div class="card" style="padding: 0; overflow: hidden;">
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 70px;">{{ t.logs_time }}</th>
+                <th>{{ t.logs_event }}</th>
+                <th style="width: 130px;">{{ t.logs_source }}</th>
+            </tr>
+        </thead>
+        <tbody id="log-rows"></tbody>
+    </table>
+    <div id="log-empty" class="meta" style="display: none; padding: 16px;">{{ t.logs_empty }}</div>
+    <div id="log-loading" class="meta" style="display: none; padding: 12px; text-align: center;">…</div>
+    <div id="log-sentinel" style="height: 1px;"></div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <style>
+    .log-filters { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+    .log-filter { padding: 5px 12px; border: 2px solid #ddd; background: white; border-radius: 16px; cursor: pointer; font-size: 12px; color: #333; }
+    .log-filter:hover { border-color: #1a73e8; color: #1a73e8; }
+    .log-filter.active { background: #1a73e8; color: white; border-color: #1a73e8; }
     .cat-badge { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px; margin-right: 6px; vertical-align: middle; }
     .cat-control    { background: #e8f0fe; color: #1a73e8; }
     .cat-pairing    { background: #fff3cd; color: #856404; }
@@ -43,10 +44,64 @@
     .cat-mqtt       { background: #f3e8fd; color: #6f42c1; }
     .cat-system     { background: #e2e3e5; color: #383d41; }
     .src-badge { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px; background: #f1f3f4; color: #555; }
-    td .meta { white-space: nowrap; }
+    #log-rows td .meta { white-space: nowrap; }
 </style>
 <script>
-// Auto-refresh every 10s
-setTimeout(() => location.reload(), 10000);
+const CAT = {{ t.category_labels | tojson }};
+const SRC = {{ t.source_labels | tojson }};
+const PAGE = 50;
+let state = { offset: 0, category: 'all', loading: false, done: false };
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
+
+function rowHtml(e) {
+    const cat = CAT[e.category] || e.category;
+    const src = e.source ? `<span class="src-badge">${esc(SRC[e.source] || e.source)}</span>` : '';
+    return `<tr><td class="meta" title="${e.ago}s">${esc(e.ago_str)}</td>`
+         + `<td><span class="cat-badge cat-${esc(e.category)}">${esc(cat)}</span>${esc(e.message)}</td>`
+         + `<td>${src}</td></tr>`;
+}
+
+async function loadMore() {
+    if (state.loading || state.done) return;
+    state.loading = true;
+    document.getElementById('log-loading').style.display = 'block';
+    try {
+        const r = await fetch(`/api/events?limit=${PAGE}&offset=${state.offset}&category=${encodeURIComponent(state.category)}`);
+        const data = await r.json();
+        document.getElementById('log-rows').insertAdjacentHTML('beforeend', data.events.map(rowHtml).join(''));
+        state.offset += data.events.length;
+        state.done = !data.has_more;
+        document.getElementById('log-empty').style.display = (state.offset === 0) ? 'block' : 'none';
+    } catch (e) {
+        console.error('Failed to load events:', e);
+    } finally {
+        state.loading = false;
+        document.getElementById('log-loading').style.display = 'none';
+    }
+}
+
+function reset() {
+    state = { offset: 0, category: state.category, loading: false, done: false };
+    document.getElementById('log-rows').innerHTML = '';
+    loadMore();
+}
+
+document.querySelectorAll('.log-filter').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('.log-filter').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    state.category = b.dataset.cat;
+    reset();
+}));
+
+// Infinite scroll: load older entries when the sentinel scrolls into view.
+new IntersectionObserver(es => { if (es[0].isIntersecting) loadMore(); })
+    .observe(document.getElementById('log-sentinel'));
+
+// Refresh the newest entries only while the user is at the top, so scrolling
+// back through history is never interrupted.
+setInterval(() => { if (!state.loading && window.scrollY < 60) reset(); }, 10000);
+
+loadMore();
 </script>
 {% endblock %}

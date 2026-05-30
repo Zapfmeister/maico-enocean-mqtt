@@ -10,9 +10,12 @@ timers in timers.py (TimerManager).
 
 import asyncio
 import logging
+import os
 import signal
 import sys
 import time
+
+from . import __version__
 
 from .config import AppConfig, DeviceConfig, load_config
 from .devices import (
@@ -61,6 +64,7 @@ _EVENT_TEXT = {
         "rls_paired": "RLS-Fernbedienung {id} gepairt",
         "mqtt_up": "MQTT-Verbindung wiederhergestellt",
         "mqtt_down": "MQTT-Verbindung verloren",
+        "restart": "🔄 Bridge gestartet (v{version})",
         "modes": {
             "off": "Aus", "heat_exchanger": "Wärmetauscher", "summer": "Sommer",
             "sleep_heat": "Schlaf (WT)", "sleep_summer": "Schlaf (Sommer)", "boost": "Stoßlüftung",
@@ -78,6 +82,7 @@ _EVENT_TEXT = {
         "rls_paired": "RLS remote {id} paired",
         "mqtt_up": "MQTT connection restored",
         "mqtt_down": "MQTT connection lost",
+        "restart": "🔄 Bridge started (v{version})",
         "modes": {
             "off": "Off", "heat_exchanger": "Heat exchanger", "summer": "Summer",
             "sleep_heat": "Sleep (HX)", "sleep_summer": "Sleep (summer)", "boost": "Boost",
@@ -109,7 +114,10 @@ class MaicoMqttBridge:
         self._poll_skip_until: float = 0.0  # skip polls until this timestamp (after RLS sync)
         self._availability: dict[str, bool] = {}  # last-published availability per device
         self._availability_task: asyncio.Task | None = None
-        self.events = EventLog()  # in-memory event log surfaced on the /logs page
+        # Event log surfaced on the /logs page, persisted next to the config so
+        # it survives restarts (degrades to memory-only if the dir isn't writable).
+        data_dir = os.path.dirname(getattr(self.config, "config_path", "") or "/data/config.yaml") or "."
+        self.events = EventLog(path=os.path.join(data_dir, "events.jsonl"))
 
     # --- Backwards-compatible accessors over the extracted state/timer stores.
     # Handlers, web.py and teach_in.py reference these names directly.
@@ -841,6 +849,9 @@ class MaicoMqttBridge:
             logger.debug("mDNS registration failed (non-critical)")
 
         logger.info("MAICO EnOcean MQTT Bridge started")
+        # Restart marker — gives the /logs view a clear boundary between this
+        # run and any persisted events from before the restart.
+        self.record_event("system", "restart", source="system", version=__version__)
         logger.info("Monitoring %d device(s), poll interval %ds",
                     len(self.config.devices), self.config.poll_interval)
         if self.serial.base_id:
