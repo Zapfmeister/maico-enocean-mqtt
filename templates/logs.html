@@ -18,7 +18,7 @@
     <table>
         <thead>
             <tr>
-                <th style="width: 70px;">{{ t.logs_time }}</th>
+                <th style="width: 115px;">{{ t.logs_time }}</th>
                 <th>{{ t.logs_event }}</th>
                 <th style="width: 130px;">{{ t.logs_source }}</th>
             </tr>
@@ -54,10 +54,18 @@ let state = { offset: 0, category: 'all', loading: false, done: false };
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
 
+// Format the event's UTC timestamp as local wall-clock time in the viewer's
+// timezone (the bridge runs in UTC). Relative "ago" moves to the tooltip.
+function fmtTime(ts) {
+    const d = new Date(ts * 1000);
+    const p = n => String(n).padStart(2, '0');
+    return `${p(d.getDate())}.${p(d.getMonth() + 1)}. ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
 function rowHtml(e) {
     const cat = CAT[e.category] || e.category;
     const src = e.source ? `<span class="src-badge">${esc(SRC[e.source] || e.source)}</span>` : '';
-    return `<tr><td class="meta" title="${e.ago}s">${esc(e.ago_str)}</td>`
+    return `<tr><td class="meta" style="white-space:nowrap;" title="${esc(e.ago_str)}">${fmtTime(e.ts)}</td>`
          + `<td><span class="cat-badge cat-${esc(e.category)}">${esc(cat)}</span>${esc(e.message)}</td>`
          + `<td>${src}</td></tr>`;
 }

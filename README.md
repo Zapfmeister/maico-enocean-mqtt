@@ -203,9 +203,6 @@ The MAICO MSC protocol is documented in detail in [`MAICO_ENOCEAN_PROTOCOL.md`](
 (private/home, hobby, research, education). **Commercial use requires a
 separate license** — see [COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md).
 
-> Note: releases up to and including the last MIT-licensed commit remain
-> available under the MIT License; this change applies going forward.
-
 ## Credits
 
 Built by [Gerard Zapf](https://github.com/zapfmeister).
