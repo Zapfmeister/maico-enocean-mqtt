@@ -173,22 +173,52 @@ The system language (configurable in Settings) also affects entity names in Home
 
 ## Environment Variables
 
+All variables are optional — sensible defaults apply. Environment variables take
+precedence over `config.yaml`.
+
+**MQTT**
+
 | Variable | Default | Description |
 |---|---|---|
 | `MQTT_HOST` | `localhost` | MQTT broker hostname |
 | `MQTT_PORT` | `1883` | MQTT broker port |
-| `MQTT_USERNAME` | | MQTT username |
+| `MQTT_USERNAME` | | MQTT username (empty = anonymous) |
 | `MQTT_PASSWORD` | | MQTT password |
-| `MAICO_SERIAL_PORT` | `/dev/ttyUSB0` | EnOcean USB stick path |
-| `MAICO_POLL_INTERVAL` | `10` | Poll interval in seconds |
-| `MAICO_WEB_PORT` | `8080` | Web UI port |
-| `MAICO_WEB_PASSWORD` | | Web UI password (empty = no auth) |
-| `MAICO_HOSTNAME` | `maico-controller` | mDNS hostname |
-| `MAICO_MQTT_CLIENT_ID` | | MQTT client id (empty = unique id generated per process) |
-| `MAICO_MDNS` | `false` | Advertise the Web UI via in-container mDNS (only useful with host networking) |
-| `MAICO_LANGUAGE` | `de` | System language (`de` or `en`) |
+| `MAICO_MQTT_CLIENT_ID` | | MQTT client id (empty = a unique id is generated per process) |
 
-Environment variables take precedence over `config.yaml`.
+**EnOcean**
+
+| Variable | Default | Description |
+|---|---|---|
+| `ENOCEAN_DEVICE_PATH` | `/dev/ttyUSB0` | Host path of the USB stick; docker-compose maps it into the container as `/dev/enocean` |
+| `MAICO_SERIAL_PORT` | `/dev/ttyUSB0` | Serial port the bridge opens **inside** the container (set to `/dev/enocean` when using the compose mapping) |
+| `MAICO_POLL_INTERVAL` | `10` | Device poll interval in seconds |
+
+**Web UI**
+
+| Variable | Default | Description |
+|---|---|---|
+| `MAICO_WEB_PORT` | `8080` | Web UI port |
+| `MAICO_WEB_PASSWORD` | | Web UI password (empty = no authentication) |
+| `MAICO_HOSTNAME` | `maico-controller` | Hostname advertised via mDNS |
+| `MAICO_MDNS` | `false` | Advertise the Web UI via in-container mDNS — only useful with host networking; otherwise the host's avahi/Bonjour already owns the hostname |
+
+**System**
+
+| Variable | Default | Description |
+|---|---|---|
+| `MAICO_LANGUAGE` | `de` | System language (`de` or `en`); also affects Home Assistant entity names |
+| `MAICO_RLS_GLOBAL_SYNC` | `false` | When `true`, the RLS 45 K wall remote controls **all** devices at once |
+| `CONFIG_PATH` | `/data/config.yaml` | Path to the configuration file |
+
+### `config.yaml`-only options
+
+A few settings have no environment override and are set only in `config.yaml`:
+
+| Option | Default | Description |
+|---|---|---|
+| `mqtt.topic_prefix` | `maico` | Base MQTT topic for all bridge topics |
+| `mqtt.ha_discovery_prefix` | `homeassistant` | Home Assistant MQTT Discovery prefix |
 
 ## Protocol Documentation
 

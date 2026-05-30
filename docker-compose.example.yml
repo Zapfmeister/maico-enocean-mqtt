@@ -8,7 +8,7 @@
 # src/__init__.py by a test) for reproducible deployments. Bump both together.
 services:
   maico-bridge:
-    image: ghcr.io/zapfmeister/maico-enocean-mqtt:0.2.0
+    image: ghcr.io/zapfmeister/maico-enocean-mqtt:0.2.1
     container_name: maico-enocean-bridge
     restart: unless-stopped
     ports:
