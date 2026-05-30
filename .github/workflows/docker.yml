@@ -28,6 +28,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history + tags, needed for the release notes
 
       - name: Read version from src/__init__.py
         id: ver
@@ -73,13 +75,29 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.ver.outputs.version }}
+          REPO: ${{ github.repository }}
         run: |
           if gh release view "v$VERSION" >/dev/null 2>&1; then
             echo "Release v$VERSION already exists — nothing to do."
-          else
-            gh release create "v$VERSION" \
-              --title "v$VERSION" \
-              --generate-notes \
-              --target "$GITHUB_SHA" \
-              docker-compose.example.yml .env.example
+            exit 0
           fi
+          # Commit-based release notes: GitHub's own generator is PR-centric and
+          # we release straight from main, so build "What's Changed" from the
+          # commit subjects since the previous tag instead.
+          PREV=$(git tag --list 'v*' --sort=-version:refname | head -1)
+          {
+            echo "## What's Changed"
+            echo
+            if [ -n "$PREV" ]; then
+              git log --no-merges --pretty='- %s (%h)' "$PREV"..HEAD
+              echo
+              echo "**Full Changelog**: https://github.com/$REPO/compare/$PREV...v$VERSION"
+            else
+              git log --no-merges --pretty='- %s (%h)'
+            fi
+          } > notes.md
+          gh release create "v$VERSION" \
+            --title "v$VERSION" \
+            --notes-file notes.md \
+            --target "$GITHUB_SHA" \
+            docker-compose.example.yml .env.example
