@@ -18,6 +18,14 @@ import yaml
 logger = logging.getLogger(__name__)
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    """Read a boolean from the environment, falling back to ``default``."""
+    val = os.environ.get(name)
+    if val is None:
+        return bool(default)
+    return val.strip().lower() in ("1", "true", "yes", "on")
+
+
 @dataclass
 class MqttConfig:
     host: str = "localhost"
@@ -26,6 +34,7 @@ class MqttConfig:
     password: str = ""
     topic_prefix: str = "maico"
     ha_discovery_prefix: str = "homeassistant"
+    client_id: str = ""  # blank → a unique id is generated per process
 
 
 @dataclass
@@ -51,6 +60,7 @@ class WebConfig:
     port: int = 8080
     password: str = ""
     hostname: str = "maico-controller"
+    mdns: bool = False  # in-container zeroconf; off by default (host avahi owns the name)
 
 
 @dataclass
@@ -110,6 +120,7 @@ class AppConfig:
                 "password": self.mqtt.password,
                 "topic_prefix": self.mqtt.topic_prefix,
                 "ha_discovery_prefix": self.mqtt.ha_discovery_prefix,
+                "client_id": self.mqtt.client_id,
             },
             "enocean": {
                 "device": self.enocean.device,
@@ -130,6 +141,7 @@ class AppConfig:
                 "port": self.web.port,
                 "password": self.web.password,
                 "hostname": self.web.hostname,
+                "mdns": self.web.mdns,
             },
             "poll_interval": self.poll_interval,
             "language": self.language,
@@ -189,6 +201,7 @@ def load_config(path: str | None = None) -> AppConfig:
         password=os.environ.get("MQTT_PASSWORD", mqtt_raw.get("password", "")),
         topic_prefix=mqtt_raw.get("topic_prefix", "maico"),
         ha_discovery_prefix=mqtt_raw.get("ha_discovery_prefix", "homeassistant"),
+        client_id=os.environ.get("MAICO_MQTT_CLIENT_ID", mqtt_raw.get("client_id", "")),
     )
 
     # EnOcean
@@ -203,6 +216,7 @@ def load_config(path: str | None = None) -> AppConfig:
         port=int(os.environ.get("MAICO_WEB_PORT", web_raw.get("port", 8080))),
         password=os.environ.get("MAICO_WEB_PASSWORD", web_raw.get("password", "")),
         hostname=os.environ.get("MAICO_HOSTNAME", web_raw.get("hostname", "maico-controller")),
+        mdns=_env_bool("MAICO_MDNS", web_raw.get("mdns", False)),
     )
 
     cfg.poll_interval = int(os.environ.get(

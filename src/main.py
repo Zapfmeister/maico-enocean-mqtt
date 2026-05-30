@@ -842,11 +842,15 @@ class MaicoMqttBridge:
         except Exception:
             logger.exception("Failed to start Web-UI")
 
-        try:
-            from .web import register_mdns
-            register_mdns(self.config.web.hostname, self.config.web.port)
-        except Exception:
-            logger.debug("mDNS registration failed (non-critical)")
+        # In-container zeroconf is off by default: from a bridged Docker network
+        # it advertises the unreachable container IP and collides with the host's
+        # avahi, which already owns the hostname. Enable only on host networking.
+        if self.config.web.mdns:
+            try:
+                from .web import register_mdns
+                register_mdns(self.config.web.hostname, self.config.web.port)
+            except Exception:
+                logger.debug("mDNS registration failed (non-critical)")
 
         logger.info("MAICO EnOcean MQTT Bridge started")
         # Restart marker — gives the /logs view a clear boundary between this
