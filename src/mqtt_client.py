@@ -197,6 +197,9 @@ class MqttClient:
             logger.info("MQTT connected")
             self._connected = True
             self.health.record_connect()
+            # Only a *re*connect is event-worthy; the first connect is just startup.
+            if self.health.reconnect_count >= 1:
+                self.bridge.record_mqtt_event(True)
             self._publish_availability("online")
             self._publish_all_discovery()
             self._subscribe_commands()
@@ -208,6 +211,7 @@ class MqttClient:
         logger.warning("MQTT disconnected (rc=%s)", rc)
         self._connected = False
         self.health.record_disconnect()
+        self.bridge.record_mqtt_event(False)
 
     def _on_message(self, client: mqtt.Client, userdata: object, msg: mqtt.MQTTMessage) -> None:
         topic = msg.topic
@@ -229,22 +233,22 @@ class MqttClient:
                 try:
                     # HA sends speed_range value (1-5) directly when speed_range_min/max is set
                     level = max(0, min(5, int(float(payload))))
-                    self.bridge.dispatch(self.bridge.set_level, device.name, level)
+                    self.bridge.dispatch(self.bridge.set_level, device.name, level, "ha")
                 except ValueError:
                     logger.error("Invalid percentage: %s", payload)
 
             elif topic == f"{dt}/set/power":
-                self.bridge.dispatch(self.bridge.set_power, device.name, payload.upper() == "ON")
+                self.bridge.dispatch(self.bridge.set_power, device.name, payload.upper() == "ON", "ha")
 
             elif topic == f"{dt}/set/mode":
                 mode = self._i18n["select_map"].get(payload)
                 if mode:
-                    self.bridge.dispatch(self.bridge.set_mode, device.name, mode)
+                    self.bridge.dispatch(self.bridge.set_mode, device.name, mode, "ha")
 
             elif topic == f"{dt}/set/preset_mode":
                 mode = PRESET_TO_MODE.get(payload.lower())
                 if mode:
-                    self.bridge.dispatch(self.bridge.set_mode, device.name, mode)
+                    self.bridge.dispatch(self.bridge.set_mode, device.name, mode, "ha")
 
             # HomeKit-friendly mode controls: a Sommer on/off switch (off =
             # Wärmetauscher) plus momentary Schlafen/Stoßlüften buttons.
@@ -254,10 +258,10 @@ class MqttClient:
                 self.bridge.dispatch(self.bridge.set_mode, device.name, mode)
 
             elif topic == f"{dt}/set/sleep":
-                self.bridge.dispatch(self.bridge.set_mode, device.name, VentilationMode.SLEEP_HEAT)
+                self.bridge.dispatch(self.bridge.set_mode, device.name, VentilationMode.SLEEP_HEAT, "ha")
 
             elif topic == f"{dt}/set/boost":
-                self.bridge.dispatch(self.bridge.set_mode, device.name, VentilationMode.BOOST)
+                self.bridge.dispatch(self.bridge.set_mode, device.name, VentilationMode.BOOST, "ha")
 
     def publish_state(self, device_name: str, state: VentilationState) -> None:
         if not self._client or not self._connected:

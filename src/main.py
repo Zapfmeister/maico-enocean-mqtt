@@ -27,6 +27,7 @@ from .devices import (
     is_valid_device_id as _is_valid_device_id,
 )
 from .enocean_serial import EnOceanSerial, RORG_MSC
+from .events import EventLog
 from .maico_protocol import (
     MscType,
     VentilationMode,
@@ -43,6 +44,46 @@ from .mqtt_client import MqttClient
 from .timers import TimerManager
 
 logger = logging.getLogger(__name__)
+
+# Localised phrasing for the UI event log. The system language drives the bridge,
+# Home Assistant and the web UI alike, so composing the message at record time is
+# consistent with whatever the user sees in the /logs page.
+_EVENT_TEXT = {
+    "de": {
+        "level": "{dev} → Stufe {level} ({mode})",
+        "level_off": "{dev} → Aus",
+        "mode": "{dev} → {mode}",
+        "rls_change": "RLS → Stufe {level} ({mode}), alle Geräte",
+        "available": "{dev} erreichbar",
+        "unavailable": "{dev} nicht erreichbar",
+        "teach_resp": "Teach-in-Antwort von {id}",
+        "device_found": "Gerät {id} im Anlernmodus erkannt",
+        "rls_paired": "RLS-Fernbedienung {id} gepairt",
+        "mqtt_up": "MQTT-Verbindung wiederhergestellt",
+        "mqtt_down": "MQTT-Verbindung verloren",
+        "modes": {
+            "off": "Aus", "heat_exchanger": "Wärmetauscher", "summer": "Sommer",
+            "sleep_heat": "Schlaf (WT)", "sleep_summer": "Schlaf (Sommer)", "boost": "Stoßlüftung",
+        },
+    },
+    "en": {
+        "level": "{dev} → level {level} ({mode})",
+        "level_off": "{dev} → off",
+        "mode": "{dev} → {mode}",
+        "rls_change": "RLS → level {level} ({mode}), all devices",
+        "available": "{dev} available",
+        "unavailable": "{dev} unavailable",
+        "teach_resp": "Teach-in response from {id}",
+        "device_found": "Device {id} detected in learn mode",
+        "rls_paired": "RLS remote {id} paired",
+        "mqtt_up": "MQTT connection restored",
+        "mqtt_down": "MQTT connection lost",
+        "modes": {
+            "off": "Off", "heat_exchanger": "Heat exchanger", "summer": "Summer",
+            "sleep_heat": "Sleep (HX)", "sleep_summer": "Sleep (summer)", "boost": "Boost",
+        },
+    },
+}
 
 
 class MaicoMqttBridge:
@@ -68,6 +109,7 @@ class MaicoMqttBridge:
         self._poll_skip_until: float = 0.0  # skip polls until this timestamp (after RLS sync)
         self._availability: dict[str, bool] = {}  # last-published availability per device
         self._availability_task: asyncio.Task | None = None
+        self.events = EventLog()  # in-memory event log surfaced on the /logs page
 
     # --- Backwards-compatible accessors over the extracted state/timer stores.
     # Handlers, web.py and teach_in.py reference these names directly.
@@ -116,6 +158,28 @@ class MaicoMqttBridge:
             loop.call_soon_threadsafe(fn, *args)
         else:
             fn(*args)
+
+    # --- Event log helpers ---
+
+    def _evt_lang(self) -> dict:
+        return _EVENT_TEXT.get(self.config.language, _EVENT_TEXT["de"])
+
+    def _mode_label(self, mode: VentilationMode) -> str:
+        return self._evt_lang()["modes"].get(mode.value, mode.value)
+
+    def _friendly(self, device_name: str) -> str:
+        dev = self._name_to_config.get(device_name)
+        return (dev.friendly_name or device_name) if dev else device_name
+
+    def record_event(self, category: str, key: str, *, device: str | None = None,
+                     source: str | None = None, **kw) -> None:
+        """Append a localised entry to the in-memory event log."""
+        message = self._evt_lang()[key].format(**kw)
+        self.events.add(category, message, device=device, source=source)
+
+    def record_mqtt_event(self, connected: bool) -> None:
+        """Called from the MQTT client thread on (re)connect / disconnect."""
+        self.record_event("mqtt", "mqtt_up" if connected else "mqtt_down", source="system")
 
     @property
     def states(self) -> dict[str, VentilationState]:
@@ -359,6 +423,8 @@ class MaicoMqttBridge:
 
         logger.info("RLS change: level=%d mode=%s → syncing all devices",
                      state.fan_level, state.mode.value)
+        self.record_event("control", "rls_change", source="rls",
+                          level=state.fan_level, mode=self._mode_label(state.mode))
 
         # Skip polls briefly so they don't overwrite the RLS sync
         self._poll_skip_until = time.time() + self.config.poll_interval + 2
@@ -372,8 +438,8 @@ class MaicoMqttBridge:
             current = self._states.get(device.name)
             if state.mode in (VentilationMode.HEAT_EXCHANGER, VentilationMode.SUMMER):
                 if not current or current.mode != state.mode:
-                    self.set_mode(device.name, state.mode)
-            self.set_level(device.name, state.fan_level)
+                    self.set_mode(device.name, state.mode, source="rls")
+            self.set_level(device.name, state.fan_level, source="rls")
 
     def _handle_sync(self, sender_str: str, dest: list[int] | None,
                      user_data: list[int]) -> None:
@@ -442,6 +508,7 @@ class MaicoMqttBridge:
 
     def _handle_teach_in_response(self, sender_str: str, dest: list[int] | None) -> None:
         logger.info("Teach-in response from %s!", sender_str)
+        self.record_event("pairing", "teach_resp", source="system", id=sender_str)
         self.mqtt.publish_event("teach_in", {
             "device_id": sender_str,
             "status": "paired",
@@ -449,6 +516,7 @@ class MaicoMqttBridge:
 
     def _handle_device_announce(self, sender_str: str) -> None:
         logger.info("Device announcement from %s (in learn mode)", sender_str)
+        self.record_event("pairing", "device_found", source="system", id=sender_str)
         self.mqtt.publish_event("device_found", {
             "device_id": sender_str,
             "status": "learning",
@@ -485,8 +553,9 @@ class MaicoMqttBridge:
 
         self._rls_teach_in_result = sender_str
         logger.info("RLS teach-in: paired with RLS %s", sender_str)
+        self.record_event("pairing", "rls_paired", source="rls", id=sender_str)
 
-    def set_level(self, device_name: str, level: int) -> bool:
+    def set_level(self, device_name: str, level: int, source: str = "system") -> bool:
         device = self._name_to_config.get(device_name)
         if not device or not self.serial.base_id:
             logger.error("Cannot set level: device=%s base_id=%s", device_name, self.serial.base_id)
@@ -522,21 +591,30 @@ class MaicoMqttBridge:
         self._states[device_name] = current
         self.mqtt.publish_state(device_name, current)
         logger.info("Set %s to level %d (%s)", device_name, level, mode.value)
+        # RLS syncs every device at once; log one summary event for it instead
+        # of N per-device entries (emitted at the RLS change site).
+        if source != "rls":
+            friendly = self._friendly(device_name)
+            if level == 0:
+                self.record_event("control", "level_off", device=friendly, source=source, dev=friendly)
+            else:
+                self.record_event("control", "level", device=friendly, source=source,
+                                   dev=friendly, level=level, mode=self._mode_label(mode))
         return True
 
-    def set_power(self, device_name: str, on: bool) -> bool:
+    def set_power(self, device_name: str, on: bool, source: str = "system") -> bool:
         if on:
             current = self._states.get(device_name, VentilationState())
             level = current.fan_level if current.fan_level > 0 else 1
-            return self.set_level(device_name, level)
+            return self.set_level(device_name, level, source=source)
         else:
-            return self.set_level(device_name, 0)
+            return self.set_level(device_name, 0, source=source)
 
     # Timer defaults (seconds)
     BOOST_DURATION = 30 * 60   # 30 minutes
     SLEEP_DURATION = 2 * 3600  # 2 hours
 
-    def set_mode(self, device_name: str, mode: VentilationMode) -> bool:
+    def set_mode(self, device_name: str, mode: VentilationMode, source: str = "system") -> bool:
         """Switch operating mode and send to device. Starts timer for sleep/boost."""
         device = self._name_to_config.get(device_name)
         if not device or not self.serial.base_id:
@@ -585,6 +663,10 @@ class MaicoMqttBridge:
         self._states[device_name] = current
         self.mqtt.publish_state(device_name, current)
         logger.info("Set %s mode to %s (level %d)", device_name, mode.value, level)
+        if source != "rls":
+            friendly = self._friendly(device_name)
+            self.record_event("control", "mode", device=friendly, source=source,
+                               dev=friendly, mode=self._mode_label(mode))
         return True
 
     def _cancel_mode_timer(self, device_name: str) -> None:
@@ -599,10 +681,10 @@ class MaicoMqttBridge:
             mode = saved.mode if saved.mode in (VentilationMode.HEAT_EXCHANGER, VentilationMode.SUMMER) else VentilationMode.HEAT_EXCHANGER
             level = saved.fan_level if saved.fan_level > 0 else 1
             logger.info("%s: timer expired, restoring %s level %d", device_name, mode.value, level)
-            self.set_level(device_name, level)
+            self.set_level(device_name, level, source="timer")
         else:
             logger.info("%s: timer expired, no saved state — setting level 1", device_name)
-            self.set_level(device_name, 1)
+            self.set_level(device_name, 1, source="timer")
 
     def send_scan(self) -> bool:
         if not self.serial.base_id:
@@ -628,10 +710,17 @@ class MaicoMqttBridge:
     def _publish_availability_if_changed(self, device_name: str) -> None:
         """Evaluate and publish device availability, only when it changes."""
         online = self._evaluate_device_availability(device_name)
-        if self._availability.get(device_name) != online:
+        prev = self._availability.get(device_name)
+        if prev != online:
             self._availability[device_name] = online
             self.mqtt.publish_device_availability(device_name, online)
             logger.info("%s availability → %s", device_name, "online" if online else "offline")
+            # Skip the initial baseline publish (prev is None) so every boot
+            # doesn't spam "unavailable" events before the first poll response.
+            if prev is not None:
+                friendly = self._friendly(device_name)
+                self.record_event("connection", "available" if online else "unavailable",
+                                  device=friendly, source="system", dev=friendly)
 
     async def _availability_loop(self) -> None:
         """Periodically expire stale roles, re-evaluate availability, republish."""
