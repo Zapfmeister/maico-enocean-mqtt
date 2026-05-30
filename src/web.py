@@ -115,6 +115,15 @@ TRANSLATIONS = {
         "mqtt_connected_since": "Verbunden seit",
         "mqtt_reconnects": "Reconnects (seit Start)",
         "mqtt_last_drop": "Letzter Abriss vor",
+        "logs": "Log",
+        "logs_title": "Ereignis-Log",
+        "logs_empty": "Noch keine Ereignisse aufgezeichnet.",
+        "logs_hint": "Im Speicher gehalten (max. 200 Einträge) — nach einem Neustart leer.",
+        "logs_time": "Zeit",
+        "logs_event": "Ereignis",
+        "logs_source": "Quelle",
+        "source_labels": {"ha": "Home Assistant", "web": "Web-UI", "rls": "RLS", "timer": "Timer", "system": "System"},
+        "category_labels": {"control": "Steuerung", "pairing": "Anlernen", "connection": "Verbindung", "mqtt": "MQTT", "system": "System"},
         "rls_pair_title": "RLS 45 K Fernbedienung anlernen",
         "rls_pair_desc": "Damit die Bridge Befehle der Wandfernbedienung empfängt, muss die RLS mit der Bridge gepairt werden. Die Bridge gibt sich dabei als PP 45 Gerät aus.",
         "rls_pair_btn": "RLS anlernen",
@@ -248,6 +257,15 @@ TRANSLATIONS = {
         "mqtt_connected_since": "Connected for",
         "mqtt_reconnects": "Reconnects (since start)",
         "mqtt_last_drop": "Last drop",
+        "logs": "Log",
+        "logs_title": "Event log",
+        "logs_empty": "No events recorded yet.",
+        "logs_hint": "Kept in memory (max. 200 entries) — empty after a restart.",
+        "logs_time": "Time",
+        "logs_event": "Event",
+        "logs_source": "Source",
+        "source_labels": {"ha": "Home Assistant", "web": "Web UI", "rls": "RLS", "timer": "Timer", "system": "System"},
+        "category_labels": {"control": "Control", "pairing": "Pairing", "connection": "Connection", "mqtt": "MQTT", "system": "System"},
         "rls_pair_title": "RLS 45 K Remote Control",
         "rls_pair_desc": "Pair the wall remote with the bridge so it can receive RLS commands. The bridge pretends to be a PP 45 device.",
         "rls_pair_btn": "Pair RLS",
@@ -452,6 +470,24 @@ def create_web_app(bridge: "MaicoMqttBridge") -> FastAPI:
             "rls": rls_info,
             "mqtt": mqtt_info,
         })
+
+    # --- Event log ---
+
+    @app.get("/logs", response_class=HTMLResponse)
+    async def logs_page(request: Request):
+        if not _check_auth(request):
+            return RedirectResponse("/login", status_code=302)
+        t = _get_lang(request, default_lang)
+        events = bridge.events.recent(limit=200)
+        for e in events:
+            e["ago_str"] = _fmt_duration(e["ago"])
+        return templates.TemplateResponse(request, "logs.html", {"t": t, "events": events})
+
+    @app.get("/api/events")
+    async def api_events(request: Request):
+        if not _check_auth(request):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        return JSONResponse(bridge.events.recent(limit=200))
 
     # --- Pairing ---
 
@@ -755,7 +791,7 @@ def create_web_app(bridge: "MaicoMqttBridge") -> FastAPI:
         if body is None:
             return JSONResponse({"error": "invalid JSON"}, status_code=400)
         level = body.get("level", 0)
-        ok = bridge.set_level(name, int(level))
+        ok = bridge.set_level(name, int(level), source="web")
         if ok:
             return JSONResponse({"status": "ok", "level": level})
         return JSONResponse({"error": "failed"}, status_code=400)
@@ -778,7 +814,7 @@ def create_web_app(bridge: "MaicoMqttBridge") -> FastAPI:
         }
         mode = mode_map.get(mode_str)
         if mode:
-            ok = bridge.set_mode(name, mode)
+            ok = bridge.set_mode(name, mode, source="web")
             if ok:
                 return JSONResponse({"status": "ok", "mode": mode_str})
         return JSONResponse({"error": "invalid mode"}, status_code=400)
@@ -792,7 +828,7 @@ def create_web_app(bridge: "MaicoMqttBridge") -> FastAPI:
         if body is None:
             return JSONResponse({"error": "invalid JSON"}, status_code=400)
         on = body.get("on", False)
-        ok = bridge.set_power(name, bool(on))
+        ok = bridge.set_power(name, bool(on), source="web")
         if ok:
             return JSONResponse({"status": "ok", "on": on})
         return JSONResponse({"error": "failed"}, status_code=400)

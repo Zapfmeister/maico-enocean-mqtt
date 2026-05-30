@@ -14,13 +14,13 @@ class FakeBridge:
     def dispatch(self, fn, *args):
         fn(*args)  # mirror the no-loop fallback
 
-    def set_mode(self, name, mode):
+    def set_mode(self, name, mode, source="system"):
         self.mode_calls.append((name, mode))
 
-    def set_level(self, name, level):
+    def set_level(self, name, level, source="system"):
         self.level_calls.append((name, level))
 
-    def set_power(self, name, on):
+    def set_power(self, name, on, source="system"):
         self.power_calls.append((name, on))
 
 
