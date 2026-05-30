@@ -6,6 +6,7 @@ received packets into the bridge; FakeMqtt records every publish.
 """
 
 from src.config import AppConfig, DeviceConfig
+from src.events import EventLog
 from src.main import MaicoMqttBridge
 
 DEFAULT_BASE = (0x05, 0xA2, 0xB6, 0xC1)
@@ -82,5 +83,7 @@ def make_bridge(devices=None, base_id=DEFAULT_BASE, rls_id="", rls_global_sync=F
     bridge = MaicoMqttBridge(cfg)
     bridge.serial = FakeSerial(base_id)
     bridge.mqtt = FakeMqtt()
+    # Keep tests hermetic: memory-only event log, no writes to the data dir.
+    bridge.events = EventLog()
     bridge._setup_device_mappings()
     return bridge

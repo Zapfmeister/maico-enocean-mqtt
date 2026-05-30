@@ -118,8 +118,9 @@ TRANSLATIONS = {
         "mqtt_last_drop": "Letzter Abriss vor",
         "logs": "Log",
         "logs_title": "Ereignis-Log",
+        "logs_all": "Alle",
         "logs_empty": "Noch keine Ereignisse aufgezeichnet.",
-        "logs_hint": "Im Speicher gehalten (max. 200 Einträge) — nach einem Neustart leer.",
+        "logs_hint": "Bleibt über Neustarts erhalten (max. 2000 Einträge). Filtern oben, Ältere laden beim Scrollen.",
         "logs_time": "Zeit",
         "logs_event": "Ereignis",
         "logs_source": "Quelle",
@@ -261,8 +262,9 @@ TRANSLATIONS = {
         "mqtt_last_drop": "Last drop",
         "logs": "Log",
         "logs_title": "Event log",
+        "logs_all": "All",
         "logs_empty": "No events recorded yet.",
-        "logs_hint": "Kept in memory (max. 200 entries) — empty after a restart.",
+        "logs_hint": "Persisted across restarts (max. 2000 entries). Filter above, older entries load as you scroll.",
         "logs_time": "Time",
         "logs_event": "Event",
         "logs_source": "Source",
@@ -480,16 +482,26 @@ def create_web_app(bridge: "MaicoMqttBridge") -> FastAPI:
         if not _check_auth(request):
             return RedirectResponse("/login", status_code=302)
         t = _get_lang(request, default_lang)
-        events = bridge.events.recent(limit=200)
-        for e in events:
-            e["ago_str"] = _fmt_duration(e["ago"])
-        return templates.TemplateResponse(request, "logs.html", {"t": t, "events": events})
+        return templates.TemplateResponse(request, "logs.html", {"t": t})
 
     @app.get("/api/events")
     async def api_events(request: Request):
         if not _check_auth(request):
             return JSONResponse({"error": "unauthorized"}, status_code=401)
-        return JSONResponse(bridge.events.recent(limit=200))
+        qp = request.query_params
+        try:
+            limit = max(1, min(200, int(qp.get("limit", 50))))
+        except (ValueError, TypeError):
+            limit = 50
+        try:
+            offset = max(0, int(qp.get("offset", 0)))
+        except (ValueError, TypeError):
+            offset = 0
+        category = qp.get("category") or None
+        result = bridge.events.query(limit=limit, offset=offset, category=category)
+        for e in result["events"]:
+            e["ago_str"] = _fmt_duration(e["ago"])
+        return JSONResponse(result)
 
     # --- Pairing ---
 
