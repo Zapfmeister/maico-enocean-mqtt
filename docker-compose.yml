@@ -1,6 +1,10 @@
+# Production: runs the published, released image. Update with:
+#   docker compose pull && docker compose up -d
+# To build from local source instead (development), add the dev override:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 services:
   maico-bridge:
-    build: .
+    image: ghcr.io/zapfmeister/maico-enocean-mqtt:0.2.1
     container_name: maico-enocean-bridge
     restart: unless-stopped
     ports:

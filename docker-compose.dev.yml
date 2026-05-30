@@ -1,0 +1,7 @@
+# Development override: build the image from local source instead of pulling
+# the released one. Layer it on top of docker-compose.yml:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+services:
+  maico-bridge:
+    build: .
