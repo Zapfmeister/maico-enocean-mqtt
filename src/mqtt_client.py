@@ -320,9 +320,14 @@ class MqttClient:
         t = f"{prefix}/{device_name}"
         self._client.publish(f"{t}/connection", json.dumps(status.to_dict()), retain=True)
         self._client.publish(f"{t}/role", status.detected_role, retain=True)
+        # last_seen and rssi feed numeric HA sensors — only publish real values.
+        # Sending the string "unknown" makes HA log an "invalid state" warning on
+        # every 30 s republish (e.g. for a device not seen yet after a restart).
         last_seen = status.last_seen_ago
-        self._client.publish(f"{t}/last_seen", last_seen if last_seen >= 0 else "unknown", retain=True)
-        self._client.publish(f"{t}/rssi", status.rssi if status.rssi is not None else "unknown", retain=True)
+        if last_seen >= 0:
+            self._client.publish(f"{t}/last_seen", last_seen, retain=True)
+        if status.rssi is not None:
+            self._client.publish(f"{t}/rssi", status.rssi, retain=True)
 
     def publish_device_availability(self, device_name: str, online: bool) -> None:
         """Publish per-device availability (online/offline) for HA entity state."""
