@@ -60,6 +60,9 @@
     <div class="container">
         {% block content %}{% endblock %}
     </div>
+    <footer style="text-align: center; color: #aaa; font-size: 12px; padding: 8px 0 24px;">
+        {{ t.brand if t else 'MAICO Controller' }} v{{ version if version else '?' }}
+    </footer>
     {% block scripts %}{% endblock %}
 </body>
 </html>
