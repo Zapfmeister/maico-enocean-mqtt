@@ -25,6 +25,9 @@
     {% if dev.state.direction != 'unknown' %}
     <div class="info-row"><span class="info-label">{{ t.airflow }}:</span> {{ direction_labels.get(dev.state.direction, dev.state.direction) }}</div>
     {% endif %}
+    {% if dev.connection and dev.connection.rssi is not none %}
+    <div class="info-row"><span class="info-label">{{ t.signal }}:</span> {{ dev.connection.rssi }} dBm</div>
+    {% endif %}
 </div>
 {% endif %}
 {% endmacro %}
