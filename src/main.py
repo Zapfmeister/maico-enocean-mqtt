@@ -371,21 +371,22 @@ class MaicoMqttBridge:
             self._state_known.add(name)
             self.mqtt.publish_state(name, state)
 
-            # Sync slave state when master turns off/on
+            # A slave physically mirrors the master's mode and fan level (its
+            # airflow runs opposite, tracked separately via 27 00 sync). Mirror
+            # every change, not just on/off — a heat_exchanger<->summer switch
+            # while both run would otherwise leave the slave's published state
+            # stale, making downstream idempotency guards (HA) re-issue the
+            # command forever.
             ds = self._device_status.get(name)
             if ds and ds.syncs_to:
                 slave_name = self._id_to_name.get(ds.syncs_to)
                 if slave_name:
                     slave_state = self._states.get(slave_name)
-                    if slave_state:
-                        if not state.is_on and slave_state.is_on:
-                            slave_state.mode = VentilationMode.OFF
-                            slave_state.fan_level = 0
-                            self.mqtt.publish_state(slave_name, slave_state)
-                        elif state.is_on and not slave_state.is_on:
-                            slave_state.mode = state.mode
-                            slave_state.fan_level = state.fan_level
-                            self.mqtt.publish_state(slave_name, slave_state)
+                    if slave_state and (slave_state.mode != state.mode
+                                        or slave_state.fan_level != state.fan_level):
+                        slave_state.mode = state.mode
+                        slave_state.fan_level = state.fan_level
+                        self.mqtt.publish_state(slave_name, slave_state)
 
         # Update connection status
         now = time.time()

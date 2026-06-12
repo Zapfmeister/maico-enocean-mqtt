@@ -1,9 +1,9 @@
 """Slave commands must be forwarded to the master (a slave mirrors the master
 and can't be driven independently)."""
 
-from src.maico_protocol import VentilationMode
+from src.maico_protocol import AirflowDirection, VentilationMode, VentilationState
 from tests.fakes import make_bridge
-from tests.test_bridge import sync_pkt
+from tests.test_bridge import BASE_STR, status_pkt, sync_pkt
 
 
 def _paired_bridge():
@@ -40,3 +40,27 @@ def test_master_and_standalone_not_redirected():
     assert b._resolve_to_master("leo") == "leo"
     b2 = make_bridge([("bad", "051EF6BA")])
     assert b2._resolve_to_master("bad") == "bad"
+
+
+def test_slave_mirrors_master_mode_switch_while_running():
+    """A heat_exchanger->summer switch while both units run must be mirrored onto
+    the slave's published state. Previously the slave was only mirrored on on/off
+    transitions, so its mode stayed stale at heat_exchanger forever — which made
+    HA's idempotency guard re-issue the command endlessly (logged as repeated
+    master 'summer' control events)."""
+    b = _paired_bridge()
+    # Both running in heat_exchanger; the slave never sends its own status, so
+    # seed and publish its mirrored state explicitly.
+    b._states["leo"] = VentilationState(mode=VentilationMode.HEAT_EXCHANGER,
+                                        fan_level=2, direction=AirflowDirection.EXHAUST)
+    b._states["schlaf"] = VentilationState(mode=VentilationMode.HEAT_EXCHANGER,
+                                           fan_level=2, direction=AirflowDirection.INFLOW)
+    b.mqtt.publish_state("schlaf", b._states["schlaf"])
+    # Master reports SUMMER level 2 (stufe 0x0A) — e.g. after HA switched it.
+    b._handle_packet(status_pkt("051EA5D9", BASE_STR, 0x0A))
+    assert b._states["leo"].mode == VentilationMode.SUMMER
+    # The slave physically follows: its published mode must mirror summer...
+    assert b._states["schlaf"].mode == VentilationMode.SUMMER
+    assert b.mqtt.states["schlaf"]["mode"] == "summer"
+    # ...while keeping its own (opposite) airflow direction.
+    assert b._states["schlaf"].direction == AirflowDirection.INFLOW
