@@ -373,7 +373,13 @@ class MqttClient:
     def _publish_all_discovery(self) -> None:
         self._publish_bridge_discovery()
         for device in self.config.devices:
-            self._publish_device_discovery(device)
+            # Role-aware: the bridge shapes each device's discovery (slave →
+            # read-only under master). Fall back to the full per-device set when
+            # no bridge is wired (e.g. unit tests with a stub bridge).
+            if hasattr(self.bridge, "publish_discovery"):
+                self.bridge.publish_discovery(device.name)
+            else:
+                self._publish_device_discovery(device)
 
     def _publish_device_discovery(self, device: DeviceConfig) -> None:
         """Publish all discovery entities for a single device."""
@@ -390,9 +396,42 @@ class MqttClient:
         self._publish_rssi_sensor_discovery(device)
         self._publish_timer_sensor_discovery(device)
 
-    def publish_device_discovery(self, device: DeviceConfig) -> None:
-        """Publish discovery for a single device (called after pairing)."""
-        self._publish_device_discovery(device)
+    def publish_device_discovery(self, device: DeviceConfig, *,
+                                 role: str = "standalone",
+                                 master: DeviceConfig | None = None) -> None:
+        """Publish discovery for a single device, shaped by its detected role.
+
+        A slave is not independently controllable (it mirrors its master), so it
+        gets NO controllable entities; its read-only sensors (direction, role,
+        connection) are homed under the master's HA device card. Disable the
+        grouping via config.pair_grouping = False to restore the old per-device
+        behaviour."""
+        grouped = (getattr(self.config, "pair_grouping", True)
+                   and role == "slave" and master is not None)
+        if not grouped:
+            self._publish_device_discovery(device)
+            return
+        # Slave: drop controllable + noise entities; re-home the read-only
+        # sensors under the master so the pair shows as one HA device.
+        self._remove_slave_entities(device)
+        name_prefix = (device.friendly_name or device.name) + " "
+        self._publish_direction_sensor_discovery(device, host_id=master.device_id, name_prefix=name_prefix)
+        self._publish_role_sensor_discovery(device, host_id=master.device_id, name_prefix=name_prefix)
+        self._publish_connection_sensor_discovery(device, host_id=master.device_id, name_prefix=name_prefix)
+
+    def _remove_slave_entities(self, device: DeviceConfig) -> None:
+        """Clear the discovery configs a slave must NOT have (controllable +
+        noise sensors). direction/role/connection are kept and re-homed under
+        the master by publish_device_discovery()."""
+        if not self._client:
+            return
+        ha = self.config.mqtt.ha_discovery_prefix
+        uid = f"maico_{device.name.lower()}"
+        for comp, suffix in [("fan", ""), ("select", "_mode"), ("switch", "_summer"),
+                             ("button", "_sleep"), ("button", "_boost"),
+                             ("sensor", "_speed"), ("sensor", "_last_seen"),
+                             ("sensor", "_rssi"), ("sensor", "_timer")]:
+            self._client.publish(f"{ha}/{comp}/{uid}{suffix}/config", "", retain=True)
 
     def remove_device_discovery(self, device: DeviceConfig) -> None:
         """Remove discovery for a device (publish empty payloads)."""
@@ -602,7 +641,9 @@ class MqttClient:
         }
         self._client.publish(f"{ha}/button/{uid}/config", json.dumps(payload), retain=True)
 
-    def _publish_direction_sensor_discovery(self, device: DeviceConfig) -> None:
+    def _publish_direction_sensor_discovery(self, device: DeviceConfig,
+                                            host_id: str | None = None,
+                                            name_prefix: str = "") -> None:
         if not self._client:
             return
         prefix = self.config.mqtt.topic_prefix
@@ -611,19 +652,21 @@ class MqttClient:
         dt = f"{prefix}/{device.name}"
 
         payload = {
-            "name": self._i18n['entity_names']['direction'],
+            "name": f"{name_prefix}{self._i18n['entity_names']['direction']}",
             "unique_id": uid,
             "object_id": uid,
             "state_topic": f"{dt}/direction",
             "icon": "mdi:air-filter",
             **self._availability_block(device.name),
             "device": {
-                "identifiers": [f"maico_{device.device_id}"],
+                "identifiers": [f"maico_{host_id or device.device_id}"],
             },
         }
         self._client.publish(f"{ha}/sensor/{uid}/config", json.dumps(payload), retain=True)
 
-    def _publish_connection_sensor_discovery(self, device: DeviceConfig) -> None:
+    def _publish_connection_sensor_discovery(self, device: DeviceConfig,
+                                             host_id: str | None = None,
+                                             name_prefix: str = "") -> None:
         """Publish MQTT Discovery for connection status sensor (managed/passive/unknown)."""
         if not self._client:
             return
@@ -633,7 +676,7 @@ class MqttClient:
         dt = f"{prefix}/{device.name}"
 
         payload = {
-            "name": self._i18n['entity_names']['connection'],
+            "name": f"{name_prefix}{self._i18n['entity_names']['connection']}",
             "unique_id": uid,
             "object_id": uid,
             "state_topic": f"{dt}/connection",
@@ -645,12 +688,14 @@ class MqttClient:
             "payload_available": "online",
             "payload_not_available": "offline",
             "device": {
-                "identifiers": [f"maico_{device.device_id}"],
+                "identifiers": [f"maico_{host_id or device.device_id}"],
             },
         }
         self._client.publish(f"{ha}/sensor/{uid}/config", json.dumps(payload), retain=True)
 
-    def _publish_role_sensor_discovery(self, device: DeviceConfig) -> None:
+    def _publish_role_sensor_discovery(self, device: DeviceConfig,
+                                       host_id: str | None = None,
+                                       name_prefix: str = "") -> None:
         if not self._client:
             return
         prefix = self.config.mqtt.topic_prefix
@@ -659,7 +704,7 @@ class MqttClient:
         dt = f"{prefix}/{device.name}"
 
         payload = {
-            "name": self._i18n['entity_names']['role'],
+            "name": f"{name_prefix}{self._i18n['entity_names']['role']}",
             "unique_id": uid,
             "object_id": uid,
             "state_topic": f"{dt}/role",
@@ -667,7 +712,7 @@ class MqttClient:
             "entity_category": "diagnostic",
             "availability_topic": f"{prefix}/bridge/status",
             "device": {
-                "identifiers": [f"maico_{device.device_id}"],
+                "identifiers": [f"maico_{host_id or device.device_id}"],
             },
         }
         self._client.publish(f"{ha}/sensor/{uid}/config", json.dumps(payload), retain=True)

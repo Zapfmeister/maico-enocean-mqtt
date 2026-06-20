@@ -118,6 +118,12 @@ class MaicoMqttBridge:
         # it survives restarts (degrades to memory-only if the dir isn't writable).
         data_dir = os.path.dirname(getattr(self.config, "config_path", "") or "/data/config.yaml") or "."
         self.events = EventLog(path=os.path.join(data_dir, "events.jsonl"))
+        # HA discovery shape (role) last published per device — drives
+        # confirm-before-emit re-publishing on role changes. Roles are persisted
+        # so the correct pair shape is published on the first discovery after a
+        # restart (no transient where a slave briefly appears controllable).
+        self._disc_role: dict[str, str] = {}
+        self._roles_path = os.path.join(data_dir, "roles.json")
 
     # --- Backwards-compatible accessors over the extracted state/timer stores.
     # Handlers, web.py and teach_in.py reference these names directly.
@@ -337,8 +343,8 @@ class MaicoMqttBridge:
 
         self.devices.register(device)
 
-        # Publish HA discovery
-        self.mqtt.publish_device_discovery(device)
+        # Publish HA discovery (role-aware: new device starts standalone)
+        self.publish_discovery(device.name)
 
         # Set default level 2
         self.set_level(name, 2)
@@ -474,6 +480,68 @@ class MaicoMqttBridge:
                     self.set_mode(device.name, state.mode, source="rls")
             self.set_level(device.name, state.fan_level, source="rls")
 
+    def discovery_role(self, name: str) -> tuple[str, DeviceConfig | None]:
+        """Detected role + master config used to shape HA discovery.
+
+        Returns ("slave", master_cfg) only when the master is known; otherwise
+        the device is treated as standalone (can't group without a master)."""
+        ds = self._device_status.get(name)
+        role = ds.detected_role if ds else "standalone"
+        if role == "slave" and ds and ds.synced_from:
+            master_name = self._id_to_name.get(ds.synced_from)
+            master = self._name_to_config.get(master_name) if master_name else None
+            if master is not None:
+                return "slave", master
+            return "standalone", None
+        return role, None
+
+    def publish_discovery(self, name: str) -> None:
+        """Publish HA discovery for one device in its current role shape."""
+        cfg = self._name_to_config.get(name)
+        if not cfg:
+            return
+        role, master = self.discovery_role(name)
+        self._disc_role[name] = role
+        self.mqtt.publish_device_discovery(cfg, role=role, master=master)
+
+    def refresh_discovery(self, name: str) -> None:
+        """Re-publish discovery only when the role shape changed (confirm-before-emit)
+        and persist roles so a restart restores the shape."""
+        role, _ = self.discovery_role(name)
+        if self._disc_role.get(name) == role:
+            return
+        self.publish_discovery(name)
+        self._save_roles()
+
+    def _save_roles(self) -> None:
+        import json
+        data = {n: {"syncs_to": ds.syncs_to, "synced_from": ds.synced_from}
+                for n, ds in self._device_status.items()
+                if ds.syncs_to or ds.synced_from}
+        try:
+            with open(self._roles_path, "w", encoding="utf-8") as f:
+                json.dump(data, f)
+        except OSError:
+            logger.debug("roles persist failed", exc_info=True)
+
+    def _restore_roles(self) -> None:
+        """Load persisted roles BEFORE the first discovery publish so the pair
+        shape is correct from the start (persist-then-reconcile). Restored roles
+        get a fresh sync grace window; live syncs re-confirm them, else they decay."""
+        import json
+        try:
+            with open(self._roles_path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            return
+        now = time.time()
+        for name, rel in data.items():
+            ds = self._device_status.setdefault(name, DeviceStatus())
+            ds.syncs_to = rel.get("syncs_to")
+            ds.synced_from = rel.get("synced_from")
+            if ds.syncs_to or ds.synced_from:
+                ds.last_sync = now
+
     def _handle_sync(self, sender_str: str, dest: list[int] | None,
                      user_data: list[int]) -> None:
         """Handle 27 00 master-slave sync. Extracts direction and detects relationships."""
@@ -505,6 +573,12 @@ class MaicoMqttBridge:
                             dest_name, dest_str,
                             sender_name or "unknown", sender_str)
                 self.mqtt.publish_connection_status(dest_name, ds)
+
+        # Re-shape HA discovery if a role just changed (cheap no-op otherwise).
+        if sender_name:
+            self.refresh_discovery(sender_name)
+        if dest_name:
+            self.refresh_discovery(dest_name)
 
         # Decode direction + level from sync byte: 27 00 [status_byte] [timer] 00
         # Sync byte = master's direction (verified from traffic).
@@ -765,6 +839,7 @@ class MaicoMqttBridge:
                 ds = self._device_status.get(device.name)
                 if ds:
                     ds.expire_stale_role(now)
+                    self.refresh_discovery(device.name)
                     # Republish connection status so last_seen / RSSI stay live in
                     # HA — they were previously only sent on a status *change*,
                     # which left "last seen" frozen at its first value.
@@ -828,6 +903,7 @@ class MaicoMqttBridge:
 
     async def run(self) -> None:
         self._setup_device_mappings()
+        self._restore_roles()  # persist-then-reconcile: roles known before discovery
         self._running = True
         self._loop = asyncio.get_running_loop()
 

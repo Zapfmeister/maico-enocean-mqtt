@@ -52,6 +52,7 @@ class FakeMqtt:
         self.timers: dict[str, int] = {}
         self.events: list[tuple[str, dict]] = []
         self.discovery: list[str] = []
+        self.discovery_roles: dict[str, str] = {}
 
     def publish_state(self, name, state):
         self.states[name] = state.to_dict()
@@ -68,8 +69,9 @@ class FakeMqtt:
     def publish_event(self, event_type, data):
         self.events.append((event_type, data))
 
-    def publish_device_discovery(self, device):
+    def publish_device_discovery(self, device, *, role="standalone", master=None):
         self.discovery.append(device.name)
+        self.discovery_roles[device.name] = role
 
 
 def make_bridge(devices=None, base_id=DEFAULT_BASE, rls_id="", rls_global_sync=False):

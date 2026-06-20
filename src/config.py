@@ -73,6 +73,7 @@ class AppConfig:
     poll_interval: int = 10
     language: str = "de"
     rls_global_sync: bool = False
+    pair_grouping: bool = True  # group a slave's read-only entities under its master in HA
     config_path: str = "/data/config.yaml"
 
     def get_device_by_name(self, name: str) -> DeviceConfig | None:
@@ -146,6 +147,7 @@ class AppConfig:
             "poll_interval": self.poll_interval,
             "language": self.language,
             "rls_global_sync": self.rls_global_sync,
+            "pair_grouping": self.pair_grouping,
         }
 
         # Write to a temp file in the same directory, then atomically replace.
@@ -230,6 +232,7 @@ def load_config(path: str | None = None) -> AppConfig:
         cfg.rls_global_sync = False
     else:
         cfg.rls_global_sync = bool(raw.get("rls_global_sync", False))
+    cfg.pair_grouping = _env_bool("MAICO_PAIR_GROUPING", raw.get("pair_grouping", True))
 
     # Devices — flat list, no master/slave distinction
     for dev_raw in raw.get("devices", []):
