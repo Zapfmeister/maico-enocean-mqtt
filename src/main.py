@@ -48,6 +48,11 @@ from .timers import TimerManager
 
 logger = logging.getLogger(__name__)
 
+# Seconds between consecutive EnOcean sends during an RLS global-sync. Firing all
+# device commands back-to-back collides on the radio (~50-150 ms airtime each) so
+# some devices miss the command — mirror the poll loop and space them out.
+RLS_SYNC_STAGGER = 0.3
+
 # Localised phrasing for the UI event log. The system language drives the bridge,
 # Home Assistant and the web UI alike, so composing the message at record time is
 # consistent with whatever the user sees in the /logs page.
@@ -468,16 +473,45 @@ class MaicoMqttBridge:
         # Skip polls briefly so they don't overwrite the RLS sync
         self._poll_skip_until = time.time() + self.config.poll_interval + 2
 
-        # Sync all master/standalone devices
+        # Sync all master/standalone devices — STAGGERED so the EnOcean sends
+        # don't collide (firing them back-to-back made a whole-house boost reach
+        # only part of the house). The handler runs on the serial RX thread, so
+        # marshal the staggered sends onto the event loop.
+        loop = getattr(self, "_loop", None)
+        if loop and loop.is_running():
+            asyncio.run_coroutine_threadsafe(self._rls_sync_all(state), loop)
+        else:
+            # No running loop (unit tests / startup): apply directly, unstaggered.
+            for device in self.config.devices:
+                ds = self._device_status.get(device.name)
+                if ds and ds.detected_role == "slave":
+                    continue
+                self._rls_apply(device.name, state)
+
+    def _rls_apply(self, name: str, state: VentilationState) -> None:
+        """Apply one device's RLS target: mode first (if changed), then level."""
+        current = self._states.get(name)
+        if state.mode in (VentilationMode.HEAT_EXCHANGER, VentilationMode.SUMMER) \
+                and (not current or current.mode != state.mode):
+            self.set_mode(name, state.mode, source="rls")
+        self.set_level(name, state.fan_level, source="rls")
+
+    async def _rls_sync_all(self, state: VentilationState) -> None:
+        """Apply an RLS global-sync to all master/standalone devices, spacing the
+        EnOcean sends by RLS_SYNC_STAGGER so they don't collide on the radio."""
+        first = True
         for device in self.config.devices:
-            dev_status = self._device_status.get(device.name)
-            if dev_status and dev_status.detected_role == "slave":
-                continue
-            # Set mode first if changed, then level — avoid sending conflicting commands
+            ds = self._device_status.get(device.name)
+            if ds and ds.detected_role == "slave":
+                continue  # slaves mirror their master, never addressed directly
+            if not first:
+                await asyncio.sleep(RLS_SYNC_STAGGER)
+            first = False
             current = self._states.get(device.name)
-            if state.mode in (VentilationMode.HEAT_EXCHANGER, VentilationMode.SUMMER):
-                if not current or current.mode != state.mode:
-                    self.set_mode(device.name, state.mode, source="rls")
+            if state.mode in (VentilationMode.HEAT_EXCHANGER, VentilationMode.SUMMER) \
+                    and (not current or current.mode != state.mode):
+                self.set_mode(device.name, state.mode, source="rls")
+                await asyncio.sleep(RLS_SYNC_STAGGER)
             self.set_level(device.name, state.fan_level, source="rls")
 
     def discovery_role(self, name: str) -> tuple[str, DeviceConfig | None]:
