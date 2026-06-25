@@ -1,7 +1,7 @@
 {
   "name": "MAICO EnOcean Bridge",
   "description": "EnOcean MQTT Bridge für MAICO PP 45 RC Lüftungsgeräte",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "slug": "maico-enocean-bridge",
   "url": "https://github.com/zapfmeister/maico-enocean-mqtt",
   "arch": ["aarch64", "amd64", "armv7"],
