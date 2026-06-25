@@ -129,6 +129,9 @@ class MaicoMqttBridge:
         # restart (no transient where a slave briefly appears controllable).
         self._disc_role: dict[str, str] = {}
         self._roles_path = os.path.join(data_dir, "roles.json")
+        # Latest cooling intent captured while a boost/sleep timer runs — applied
+        # when the timer ends so the device lands on the current desired mode.
+        self._pending_after_timer: dict[str, VentilationState] = {}
 
     # --- Backwards-compatible accessors over the extracted state/timer stores.
     # Handlers, web.py and teach_in.py reference these names directly.
@@ -708,6 +711,13 @@ class MaicoMqttBridge:
                            device_name, device.device_id)
             return False
 
+        # Don't let an automated level command cut a running boost/sleep short —
+        # capture it and apply it when the timer ends.
+        if source == "ha" and self.timers.has(device_name):
+            self._pending_after_timer.setdefault(device_name, VentilationState()).fan_level = \
+                max(0, min(5, level))
+            return True
+
         # Manual level change cancels any active sleep/boost timer
         self._cancel_mode_timer(device_name)
         saved = self._saved_states.pop(device_name, None)
@@ -762,6 +772,16 @@ class MaicoMqttBridge:
         device = self._name_to_config.get(device_name)
         if not device or not self.serial.base_id:
             return False
+
+        # A boost/sleep is running: don't let the HA cooling automations cut it
+        # short. Capture the latest cooling intent and apply it when the timer
+        # ends. Deliberate sources (RLS remote, web UI, explicit OFF/boost) fall
+        # through and act immediately.
+        if source == "ha" and mode in (VentilationMode.HEAT_EXCHANGER, VentilationMode.SUMMER) \
+                and self.timers.has(device_name):
+            self._pending_after_timer.setdefault(device_name, VentilationState()).mode = mode
+            logger.info("%s: boost active — deferring %s until it ends", device_name, mode.value)
+            return True
 
         current = self._states.get(device_name, VentilationState())
 
@@ -820,14 +840,18 @@ class MaicoMqttBridge:
 
     def _restore_mode(self, device_name: str) -> None:
         saved = self._saved_states.pop(device_name, None)
-        if saved:
-            mode = saved.mode if saved.mode in (VentilationMode.HEAT_EXCHANGER, VentilationMode.SUMMER) else VentilationMode.HEAT_EXCHANGER
-            level = saved.fan_level if saved.fan_level > 0 else 1
-            logger.info("%s: timer expired, restoring %s level %d", device_name, mode.value, level)
-            self.set_level(device_name, level, source="timer")
-        else:
-            logger.info("%s: timer expired, no saved state — setting level 1", device_name)
-            self.set_level(device_name, 1, source="timer")
+        pending = self._pending_after_timer.pop(device_name, None)
+        # Prefer the cooling intent captured while the timer ran (so the device
+        # lands on the *current* desired mode), else the saved pre-timer state.
+        cool = (VentilationMode.HEAT_EXCHANGER, VentilationMode.SUMMER)
+        mode = next((m for m in (pending.mode if pending else None,
+                                 saved.mode if saved else None) if m in cool),
+                    VentilationMode.HEAT_EXCHANGER)
+        level = next((lvl for lvl in (pending.fan_level if pending else 0,
+                                      saved.fan_level if saved else 0) if lvl and lvl > 0), 1)
+        logger.info("%s: timer expired → %s level %d", device_name, mode.value, level)
+        self.set_mode(device_name, mode, source="timer")
+        self.set_level(device_name, level, source="timer")
 
     def send_scan(self) -> bool:
         if not self.serial.base_id:
